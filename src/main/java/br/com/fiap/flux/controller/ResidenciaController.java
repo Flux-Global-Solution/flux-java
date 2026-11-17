@@ -1,7 +1,6 @@
 package br.com.fiap.flux.controller;
 
 import br.com.fiap.flux.dto.DispositivoResponseDTO;
-import br.com.fiap.flux.dto.MoradorResidenciaResponseDTO;
 import br.com.fiap.flux.dto.ResidenciaRequestDTO;
 import br.com.fiap.flux.dto.ResidenciaResponseDTO;
 import br.com.fiap.flux.service.ResidenciaService;
@@ -9,16 +8,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 
-/**
- * Residências: cadastro e gerenciamento. Os endpoints não exigem login. O morador só é informado no
- * cadastro, para criar o vínculo de titularidade; consultar, alterar e excluir usam o id da
- * residência.
- *
- * <p>Respostas de erro: 404 para residência inexistente, 409 se a exclusão é recusada por haver
- * histórico, 400 para validação e 500 para falha interna.</p>
- */
+/** Residências: cadastro e gerenciamento. */
 @CrossOrigin("*")
 @RestController
 @RequestMapping("/residencias")
@@ -41,12 +32,17 @@ public class ResidenciaController {
         }
     }
 
-    /**
-     * Lista as residências às quais o morador tem acesso, com o tipo de vínculo dele em cada uma.
-     */
+    /** Lista as residências às quais o morador tem acesso, com o tipo de vínculo dele em cada uma. */
     @GetMapping("/morador/{idMorador}")
-    public ResponseEntity<List<ResidenciaResponseDTO>> listar(@PathVariable int idMorador) {
-        return ResponseEntity.ok(service.listar(idMorador));
+    public ResponseEntity<?> listar(@PathVariable int idMorador) {
+        try {
+            return ResponseEntity.ok(service.listar(idMorador));
+        } catch (IllegalArgumentException e) {
+            return erro(e, "Erro ao listar as residências");
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Erro ao listar as residências: " + e.getMessage());
+        }
     }
 
     /** Consulta uma residência. */
@@ -73,10 +69,7 @@ public class ResidenciaController {
         }
     }
 
-    /**
-     * Exclui a residência, se ela ainda não tem dispositivo, leituras, alertas, perfil nem
-     * autorizações.
-     */
+    /** Exclui a residência, se ela ainda não tem dispositivo, leituras, alertas, perfil nem autorizações. */
     @DeleteMapping("/{id}")
     public ResponseEntity<String> excluir(@PathVariable int id) {
         try {
@@ -92,8 +85,12 @@ public class ResidenciaController {
 
     /** Lista os moradores vinculados à residência, o titular primeiro. */
     @GetMapping("/{id}/moradores")
-    public ResponseEntity<List<MoradorResidenciaResponseDTO>> listarMoradores(@PathVariable int id) {
-        return ResponseEntity.ok(service.listarMoradores(id));
+    public ResponseEntity<?> listarMoradores(@PathVariable int id) {
+        try {
+            return ResponseEntity.ok(service.listarMoradores(id));
+        } catch (IllegalArgumentException e) {
+            return erro(e, "Erro ao listar os moradores");
+        }
     }
 
     /** Consulta o dispositivo instalado na residência. */

@@ -28,14 +28,17 @@ public class PerfilConsumoDAO {
      * Cadastra um novo perfil de consumo. O id gerado é preenchido no próprio objeto.
      *
      * @param perfil perfil de consumo a ser cadastrado
-     * @throws IllegalStateException se o banco falhar
      */
     public void cadastrar(PerfilConsumo perfil) {
         String sql = "INSERT INTO Perfil_Consumo (vl_consumo_medio, vl_vazao_media, vl_desvio_padrao, " +
                 "dt_ultima_atualizacao, ds_padrao_consumo, nr_historico_suficiente, id_residencia) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?)";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql, new String[]{"ID_PERFIL_CONSUMO"})) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql, new String[]{"ID_PERFIL_CONSUMO"});
             ps.setDouble(1, perfil.getConsumoMedio());
             ps.setDouble(2, perfil.getVazaoMedia());
             ps.setDouble(3, perfil.getDesvioPadrao());
@@ -43,6 +46,7 @@ public class PerfilConsumoDAO {
             ps.setString(5, perfil.getPadraoConsumo());
             ps.setInt(6, perfil.getHistoricoSuficiente());
             ps.setInt(7, perfil.getResidencia().getIdResidencia());
+
             ps.executeUpdate();
 
             try (ResultSet rsGerado = ps.getGeneratedKeys()) {
@@ -50,9 +54,18 @@ public class PerfilConsumoDAO {
                     perfil.setIdPerfilConsumo(rsGerado.getInt(1));
                 }
             }
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível cadastrar o perfil de consumo.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -60,14 +73,17 @@ public class PerfilConsumoDAO {
      * Atualiza os dados calculados de um perfil já cadastrado. A residência do perfil não muda.
      *
      * @param perfil perfil de consumo com os dados atualizados (o id é usado como referência)
-     * @throws IllegalStateException se o banco falhar
      */
     public void alterar(PerfilConsumo perfil) {
         String sql = "UPDATE Perfil_Consumo SET vl_consumo_medio = ?, vl_vazao_media = ?, " +
                 "vl_desvio_padrao = ?, dt_ultima_atualizacao = ?, ds_padrao_consumo = ?, " +
                 "nr_historico_suficiente = ? WHERE id_perfil_consumo = ?";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setDouble(1, perfil.getConsumoMedio());
             ps.setDouble(2, perfil.getVazaoMedia());
             ps.setDouble(3, perfil.getDesvioPadrao());
@@ -75,27 +91,48 @@ public class PerfilConsumoDAO {
             ps.setString(5, perfil.getPadraoConsumo());
             ps.setInt(6, perfil.getHistoricoSuficiente());
             ps.setInt(7, perfil.getIdPerfilConsumo());
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível atualizar o perfil de consumo.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
     /**
      * Remove um perfil de consumo do banco de dados.
      *
-     * @param idPerfilConsumo identificador do perfil a ser removido
-     * @throws IllegalStateException se o banco falhar
+     * @param idPerfilConsumo identificador eficiência do perfil a ser removido
      */
     public void excluir(int idPerfilConsumo) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("DELETE FROM Perfil_Consumo WHERE id_perfil_consumo = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement("DELETE FROM Perfil_Consumo WHERE id_perfil_consumo = ?");
             ps.setInt(1, idPerfilConsumo);
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível excluir o perfil de consumo.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -104,19 +141,36 @@ public class PerfilConsumoDAO {
      *
      * @param idPerfilConsumo identificador do perfil
      * @return o perfil encontrado, ou {@code null} caso não exista
-     * @throws IllegalStateException se o banco falhar
      */
     public PerfilConsumo buscarPorId(int idPerfilConsumo) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Perfil_Consumo WHERE id_perfil_consumo = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        PerfilConsumo perfil = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Perfil_Consumo WHERE id_perfil_consumo = ?");
             ps.setInt(1, idPerfilConsumo);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? montar(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                perfil = montar(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar o perfil de consumo.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return perfil;
     }
 
     /**
@@ -125,43 +179,72 @@ public class PerfilConsumoDAO {
      *
      * @param idResidencia identificador da residência
      * @return o perfil encontrado, ou {@code null} se a residência ainda não tem perfil
-     * @throws IllegalStateException se o banco falhar
      */
     public PerfilConsumo buscarPorResidencia(int idResidencia) {
         String sql = "SELECT * FROM Perfil_Consumo WHERE id_residencia = ? " +
                 "ORDER BY dt_ultima_atualizacao DESC, id_perfil_consumo DESC FETCH FIRST 1 ROWS ONLY";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        PerfilConsumo perfil = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, idResidencia);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? montar(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                perfil = montar(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar o perfil de consumo da residência.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return perfil;
     }
 
     /**
      * Lista todos os perfis de consumo cadastrados, em uma única consulta.
      *
      * @return lista de perfis de consumo cadastrados
-     * @throws IllegalStateException se o banco falhar
      */
     public List<PerfilConsumo> listar() {
         List<PerfilConsumo> perfis = new ArrayList<>();
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
 
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Perfil_Consumo ORDER BY id_perfil_consumo");
-             ResultSet rs = ps.executeQuery()) {
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Perfil_Consumo ORDER BY id_perfil_consumo");
+            ResultSet rs = ps.executeQuery();
 
             while (rs.next()) {
                 perfis.add(montar(rs));
             }
 
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar os perfis de consumo.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return perfis;
     }

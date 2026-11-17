@@ -24,8 +24,6 @@ import java.util.List;
  */
 public class LeituraDAO {
 
-    private static final int ERRO_CHAVE_DUPLICADA = 1;
-
     private static final String SQL_INSERIR = "INSERT INTO Leitura (dt_leitura, nr_sequencia, " +
             "vl_vazao_litro_minuto, vl_volume_litros, nr_duracao_fluxo_seg, nr_sincronizada, " +
             "dt_sincronizacao, id_dispositivo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
@@ -34,16 +32,26 @@ public class LeituraDAO {
      * Cadastra uma nova leitura. O id gerado é preenchido no próprio objeto.
      *
      * @param leitura leitura a ser cadastrada
-     * @throws IllegalArgumentException se a sequência já existe para o dispositivo
-     * @throws IllegalStateException    se o banco falhar
      */
     public void cadastrar(Leitura leitura) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(SQL_INSERIR, new String[]{"ID_LEITURA"})) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(SQL_INSERIR, new String[]{"ID_LEITURA"});
             inserir(ps, leitura);
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw erroDeGravacao(e, "Não foi possível cadastrar a leitura.");
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -52,34 +60,40 @@ public class LeituraDAO {
      * gerado de cada uma é preenchido no próprio objeto.
      *
      * @param leituras leituras a serem cadastradas
-     * @throws IllegalArgumentException se alguma sequência já existe para o dispositivo (nada é
-     *     gravado)
-     * @throws IllegalStateException    se o banco falhar (nada é gravado)
      */
     public void cadastrarLote(List<Leitura> leituras) {
-        try (Connection con = ConnectionFactory.obterConexao()) {
+        Connection conexao = ConnectionFactory.obterConexao();
+
+        try {
             boolean confirmado = false;
             try {
-                con.setAutoCommit(false);
-                try (PreparedStatement ps = con.prepareStatement(SQL_INSERIR, new String[]{"ID_LEITURA"})) {
+                conexao.setAutoCommit(false);
+                try (PreparedStatement ps = conexao.prepareStatement(SQL_INSERIR, new String[]{"ID_LEITURA"})) {
                     for (Leitura leitura : leituras) {
                         inserir(ps, leitura);
                     }
                 }
-                con.commit();
+                conexao.commit();
                 confirmado = true;
             } finally {
                 // Desfaz antes de devolver a conexão: no Oracle, ligar o autocommit com a
                 // transação aberta confirmaria tudo.
                 if (!confirmado) {
-                    con.rollback();
+                    conexao.rollback();
                 }
-                con.setAutoCommit(true);
+                conexao.setAutoCommit(true);
             }
         } catch (SQLException e) {
             e.printStackTrace();
             leituras.forEach(l -> l.setIdLeitura(0));
-            throw erroDeGravacao(e, "Não foi possível cadastrar as leituras.");
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -87,14 +101,17 @@ public class LeituraDAO {
      * Atualiza os dados de uma leitura já cadastrada.
      *
      * @param leitura leitura com os dados atualizados (o id é usado como referência)
-     * @throws IllegalStateException se o banco falhar
      */
     public void alterar(Leitura leitura) {
         String sql = "UPDATE Leitura SET dt_leitura = ?, nr_sequencia = ?, vl_vazao_litro_minuto = ?, " +
                 "vl_volume_litros = ?, nr_duracao_fluxo_seg = ?, nr_sincronizada = ?, " +
                 "dt_sincronizacao = ?, id_dispositivo = ? WHERE id_leitura = ?";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             setDataHora(ps, 1, leitura.getDataLeitura());
             ps.setInt(2, leitura.getSequencia());
             ps.setDouble(3, leitura.getVazaoLitroMinuto());
@@ -104,10 +121,20 @@ public class LeituraDAO {
             setDataHora(ps, 7, leitura.getDataSincronizacao());
             ps.setInt(8, leitura.getDispositivo().getIdDispositivo());
             ps.setInt(9, leitura.getIdLeitura());
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível alterar a leitura.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -115,16 +142,27 @@ public class LeituraDAO {
      * Remove uma leitura do banco de dados.
      *
      * @param idLeitura identificador da leitura a ser removida
-     * @throws IllegalStateException se o banco falhar
      */
     public void excluir(int idLeitura) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("DELETE FROM Leitura WHERE id_leitura = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement("DELETE FROM Leitura WHERE id_leitura = ?");
             ps.setInt(1, idLeitura);
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível excluir a leitura.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -133,19 +171,36 @@ public class LeituraDAO {
      *
      * @param idLeitura identificador da leitura
      * @return a leitura encontrada, ou {@code null} caso não exista
-     * @throws IllegalStateException se o banco falhar
      */
     public Leitura buscarPorId(int idLeitura) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Leitura WHERE id_leitura = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        Leitura leitura = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Leitura WHERE id_leitura = ?");
             ps.setInt(1, idLeitura);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? montar(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                leitura = montar(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar a leitura.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return leitura;
     }
 
     /**
@@ -155,21 +210,39 @@ public class LeituraDAO {
      * @param idDispositivo identificador do dispositivo
      * @param sequencia     número de sequência da leitura
      * @return a leitura encontrada, ou {@code null} se a sequência ainda não foi usada
-     * @throws IllegalStateException se o banco falhar
      */
     public Leitura buscarPorDispositivoESequencia(int idDispositivo, int sequencia) {
         String sql = "SELECT * FROM Leitura WHERE id_dispositivo = ? AND nr_sequencia = ?";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        Leitura leitura = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, idDispositivo);
             ps.setInt(2, sequencia);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? montar(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                leitura = montar(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar a leitura.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return leitura;
     }
 
     /**
@@ -183,7 +256,6 @@ public class LeituraDAO {
      * @param de            início do período
      * @param ate           fim do período
      * @return leituras que atendem aos filtros
-     * @throws IllegalStateException se o banco falhar
      */
     public List<Leitura> listarFiltrado(Integer idResidencia, Integer idDispositivo, Integer idMorador,
                                         LocalDateTime de, LocalDateTime ate) {
@@ -197,8 +269,12 @@ public class LeituraDAO {
                 (de != null ? "AND l.dt_leitura >= ? " : "") +
                 (ate != null ? "AND l.dt_leitura <= ? " : "") +
                 "ORDER BY l.dt_leitura, l.nr_sequencia, l.id_leitura";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             int indice = 1;
             if (idResidencia != null) {
                 ps.setInt(indice++, idResidencia);
@@ -215,14 +291,25 @@ public class LeituraDAO {
             if (ate != null) {
                 ps.setTimestamp(indice, Timestamp.valueOf(ate));
             }
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    leituras.add(montar(rs));
-                }
+
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                leituras.add(montar(rs));
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar as leituras.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return leituras;
     }
@@ -231,23 +318,33 @@ public class LeituraDAO {
      * Lista todas as leituras cadastradas, em uma única consulta.
      *
      * @return lista de leituras cadastradas
-     * @throws IllegalStateException se o banco falhar
      */
     public List<Leitura> listar() {
         List<Leitura> leituras = new ArrayList<>();
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
 
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(
-                     "SELECT * FROM Leitura ORDER BY dt_leitura, nr_sequencia, id_leitura");
-             ResultSet rs = ps.executeQuery()) {
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Leitura ORDER BY dt_leitura, nr_sequencia, id_leitura");
+            ResultSet rs = ps.executeQuery();
 
             while (rs.next()) {
                 leituras.add(montar(rs));
             }
 
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar as leituras.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return leituras;
     }
@@ -275,22 +372,6 @@ public class LeituraDAO {
                 leitura.setIdLeitura(rsGerado.getInt(1));
             }
         }
-    }
-
-    /**
-     * Converte uma falha de gravação na exceção adequada: sequência repetida no dispositivo vira
-     * erro de validação; qualquer outra falha é interna.
-     *
-     * @param e        falha do banco
-     * @param mensagem mensagem usada quando a falha não é de sequência repetida
-     * @return {@link IllegalArgumentException} para sequência repetida, ou
-     *     {@link IllegalStateException} nos demais casos
-     */
-    private RuntimeException erroDeGravacao(SQLException e, String mensagem) {
-        if (e.getErrorCode() == ERRO_CHAVE_DUPLICADA) {
-            return new IllegalArgumentException("Já existe uma leitura com esta sequência para o dispositivo.", e);
-        }
-        return new IllegalStateException(mensagem, e);
     }
 
     /**

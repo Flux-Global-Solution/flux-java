@@ -3,7 +3,6 @@ package br.com.fiap.flux.service;
 import br.com.fiap.flux.dao.AlertaDAO;
 import br.com.fiap.flux.dao.DispositivoDAO;
 import br.com.fiap.flux.dao.LeituraDAO;
-import br.com.fiap.flux.dao.MoradorResidenciaDAO;
 import br.com.fiap.flux.dao.PerfilConsumoDAO;
 import br.com.fiap.flux.dao.ResidenciaDAO;
 import br.com.fiap.flux.dto.AnaliseGeralResponseDTO;
@@ -16,20 +15,17 @@ import br.com.fiap.flux.mapper.AnaliseMapper;
 import br.com.fiap.flux.models.Alerta;
 import br.com.fiap.flux.models.Dispositivo;
 import br.com.fiap.flux.models.Leitura;
-import br.com.fiap.flux.models.MoradorResidencia;
 import br.com.fiap.flux.models.PerfilConsumo;
 import br.com.fiap.flux.models.Residencia;
-import org.springframework.http.HttpStatus;
+import br.com.fiap.flux.util.ConsumoUtil;
+import br.com.fiap.flux.util.ConsumoUtil.Periodo;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,8 +37,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Análise simulada de consumo: faz o papel da inteligência artificial que, no futuro, vai analisar
@@ -151,17 +145,8 @@ public class AnaliseConsumoService {
     static final double MULTIPLO_CRITICO = 2.0;
 
     private static final Locale PT_BR = Locale.forLanguageTag("pt-BR");
-    private static final Pattern DATA = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})|(\\d{2}/\\d{2}/\\d{4})");
-    private static final DateTimeFormatter DATA_BR = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     // evita que duas análises simultâneas criem o mesmo alerta (conferir e gravar viram uma etapa só)
     private static final Object TRAVA_GRAVACAO = new Object();
-
-    /** Intervalo de datas (inclusivo) em que a residência estava ausente. */
-    private record Periodo(LocalDate inicio, LocalDate fim) {
-        boolean contem(LocalDate dia) {
-            return !dia.isBefore(inicio) && !dia.isAfter(fim);
-        }
-    }
 
     /**
      * Sequência de trechos de um mesmo dispositivo sem pausa maior que a tolerância: o "fluxo
@@ -250,7 +235,6 @@ public class AnaliseConsumoService {
     private final PerfilConsumoDAO perfilDAO;
     private final ResidenciaDAO residenciaDAO;
     private final DispositivoDAO dispositivoDAO;
-    private final MoradorResidenciaDAO moradorResidenciaDAO;
     private final NotificacaoService notificacaoService;
 
     public AnaliseConsumoService() {
@@ -259,113 +243,67 @@ public class AnaliseConsumoService {
         this.perfilDAO = new PerfilConsumoDAO();
         this.residenciaDAO = new ResidenciaDAO();
         this.dispositivoDAO = new DispositivoDAO();
-        this.moradorResidenciaDAO = new MoradorResidenciaDAO();
         this.notificacaoService = new NotificacaoService();
     }
 
     // ------------------------------------------------------------------ operações
 
     /**
-     * Roda a análise e grava os alertas das anomalias novas. Só o titular da residência.
-     *
-     * @throws ResponseStatusException 403 se não for o titular
-     * @throws IllegalArgumentException se a residência não existe
-     */
-    public AnaliseResultadoResponseDTO executar(int idMorador, int idResidencia) {
-        Residencia residencia = exigirResidencia(idResidencia);
-        exigirTitular(idMorador, idResidencia);
-        return analisar(residencia, true);
-    }
-
-    /**
-     * Resultado mais recente: refaz o cálculo com as leituras de agora, sem gravar nada, e mostra
-     * quais
-     * anomalias já têm alerta ({@code NOVO} para as que ainda não têm). Qualquer morador vinculado
-     * pode.
-     *
-     * @throws ResponseStatusException 403 se não houver vínculo
-     * @throws IllegalArgumentException se a residência não existe
-     */
-    public AnaliseResultadoResponseDTO resultado(int idMorador, int idResidencia) {
-        Residencia residencia = exigirResidencia(idResidencia);
-        exigirVinculo(idMorador, idResidencia);
-        return analisar(residencia, false);
-    }
-
-    /**
-     * Histórico: alertas da residência, do mais recente para o mais antigo. {@code inicio} e {@code
-     * fim}
-     * (opcionais) filtram pela data de identificação: "2026-11-01" ou "2026-11-01T08:00". Qualquer
-     * morador
-     * vinculado pode.
-     *
-     * @throws ResponseStatusException 403 se não houver vínculo
-     * @throws IllegalArgumentException se o período é inválido ou a residência não existe
-     */
-    public List<AnaliseHistoricoResponseDTO> historico(int idMorador, int idResidencia, String inicio, String fim) {
-        LocalDateTime de = lerPeriodo(inicio, "inicio", false);
-        LocalDateTime ate = lerPeriodo(fim, "fim", true);
-        if (de != null && ate != null && de.isAfter(ate)) {
-            throw new IllegalArgumentException("O início do período não pode ser depois do fim.");
-        }
-        exigirResidencia(idResidencia);
-        exigirVinculo(idMorador, idResidencia);
-        return alertaDAO.listarPorResidencia(idResidencia, de, ate)
-                .stream()
-                .map(AnaliseMapper::toHistoricoDto)
-                .toList();
-    }
-
-    /**
-     * Roda a análise nas residências em que o morador é titular (as outras são ignoradas).
+     * Roda a análise nas residências em que o morador é titular (as outras são ignoradas) e grava
+     * os alertas das anomalias novas.
      *
      * @throws IllegalArgumentException se o morador não é titular de nenhuma residência
      */
     public List<AnaliseResultadoResponseDTO> executarPorMorador(int idMorador) {
-        List<ResidenciaDAO.ResidenciaComVinculo> vinculadas = residenciaDAO.listarPorMorador(idMorador);
-        List<AnaliseResultadoResponseDTO> resultados = vinculadas.stream()
-                .filter(v -> v.tipoVinculo() == br.com.fiap.flux.enums.TipoVinculoEnum.TITULAR)
-                .map(v -> executar(idMorador, v.residencia().getIdResidencia()))
-                .toList();
+        List<AnaliseResultadoResponseDTO> resultados = new ArrayList<>();
+        for (ResidenciaDAO.ResidenciaComVinculo v : residenciaDAO.listarPorMorador(idMorador)) {
+            if (v.tipoVinculo() == br.com.fiap.flux.enums.TipoVinculoEnum.TITULAR) {
+                resultados.add(analisar(v.residencia(), true));
+            }
+        }
         if (resultados.isEmpty()) {
-            throw new IllegalArgumentException("Nenhuma residência titular encontrada para o morador informado.");
+            throw new IllegalArgumentException("Nenhuma residência titular encontrada para o morador informado");
         }
         return resultados;
     }
 
     /**
-     * Resultado atual de todas as residências vinculadas ao morador, sem gravar nada.
+     * Resultado atual de cada residência do morador: refaz o cálculo com as leituras de agora, sem
+     * gravar nada, e mostra quais anomalias já têm alerta ({@code NOVO} para as que ainda não têm).
      *
      * @throws IllegalArgumentException se o morador não tem nenhuma residência
      */
     public List<AnaliseResultadoResponseDTO> resultadoPorMorador(int idMorador) {
-        List<ResidenciaDAO.ResidenciaComVinculo> vinculadas = residenciaDAO.listarPorMorador(idMorador);
-        if (vinculadas.isEmpty()) {
-            throw new IllegalArgumentException("Nenhuma residência encontrada para o morador informado.");
+        List<AnaliseResultadoResponseDTO> resultados = new ArrayList<>();
+        for (ResidenciaDAO.ResidenciaComVinculo v : listarResidencias(idMorador)) {
+            resultados.add(analisar(v.residencia(), false));
         }
-        return vinculadas.stream()
-                .map(v -> resultado(idMorador, v.residencia().getIdResidencia()))
-                .toList();
+        return resultados;
     }
 
     /**
-     * Histórico de todas as residências vinculadas ao morador, juntos e do mais recente para o mais
-     * antigo.
+     * Histórico de alertas de todas as residências do morador, juntos e do mais recente para o mais
+     * antigo. {@code inicio} e {@code fim} (opcionais) filtram pela data de identificação:
+     * "2026-11-01" ou "2026-11-01T08:00".
      *
-     * @throws IllegalArgumentException se o morador não tem nenhuma residência
+     * @throws IllegalArgumentException se o período é inválido ou o morador não tem residência
      */
     public List<AnaliseHistoricoResponseDTO> historicoPorMorador(int idMorador, String inicio, String fim) {
-        List<ResidenciaDAO.ResidenciaComVinculo> vinculadas = residenciaDAO.listarPorMorador(idMorador);
-        if (vinculadas.isEmpty()) {
-            throw new IllegalArgumentException("Nenhuma residência encontrada para o morador informado.");
+        LocalDateTime de = ConsumoUtil.lerPeriodo(inicio, "inicio", false);
+        LocalDateTime ate = ConsumoUtil.lerPeriodo(fim, "fim", true);
+        if (de != null && ate != null && de.isAfter(ate)) {
+            throw new IllegalArgumentException("O início do período não pode ser depois do fim.");
         }
-        return vinculadas.stream()
-                .flatMap(v -> historico(idMorador, v.residencia().getIdResidencia(), inicio, fim).stream())
-                .sorted(java.util.Comparator.comparing(AnaliseHistoricoResponseDTO::dataIdentificacao).reversed())
-                .toList();
+
+        List<AnaliseHistoricoResponseDTO> historico = new ArrayList<>();
+        for (ResidenciaDAO.ResidenciaComVinculo v : listarResidencias(idMorador)) {
+            for (Alerta alerta : alertaDAO.listarPorResidencia(v.residencia().getIdResidencia(), de, ate)) {
+                historico.add(AnaliseMapper.toHistoricoDto(alerta));
+            }
+        }
+        historico.sort(java.util.Comparator.comparing(AnaliseHistoricoResponseDTO::dataIdentificacao).reversed());
+        return historico;
     }
-
-
 
     /**
      * Roda a análise sozinha a cada 5 minutos (RN01 e RN02), em todas as residências com
@@ -490,7 +428,7 @@ public class AnaliseConsumoService {
      */
     List<Ocorrencia> detectar(Residencia residencia, PerfilConsumo perfil, List<Leitura> leituras,
                               LocalDateTime inicioJanela) {
-        List<Periodo> ausencias = lerAusencias(residencia.getPeriodoAusencia());
+        List<Periodo> ausencias = ConsumoUtil.lerAusencias(residencia.getPeriodoAusencia());
         boolean perfilConfiavel = perfil != null && perfil.possuiHistoricoSuficiente();
         double consumoMedio = perfilConfiavel ? perfil.getConsumoMedio() : 0;
         double vazaoMedia = perfilConfiavel ? perfil.getVazaoMedia() : 0;
@@ -515,7 +453,7 @@ public class AnaliseConsumoService {
                 .toList();
 
         // 2. Consumo em período de ausência, dia a dia.
-        for (List<Leitura> dia : agruparPor(restantes, l -> emAusencia(ausencias, l.getDataLeitura().toLocalDate())
+        for (List<Leitura> dia : agruparPor(restantes, l -> ConsumoUtil.emAusencia(ausencias, l.getDataLeitura().toLocalDate())
                 ? l.getDataLeitura().toLocalDate() : null)) {
             Ocorrencia ocorrencia = consumoEmAusencia(dia, consumoMedio);
             if (ocorrencia != null) {
@@ -592,7 +530,7 @@ public class AnaliseConsumoService {
             return null;
         }
 
-        boolean ausente = emAusencia(ausencias, fluxo.inicio.toLocalDate());
+        boolean ausente = ConsumoUtil.emAusencia(ausencias, fluxo.inicio.toLocalDate());
         boolean vazaoAlta = vazaoMedia > 0 && fluxo.vazaoMedia() >= FATOR_VAZAO_ALTA * vazaoMedia;
 
         Ocorrencia ocorrencia = nova(fluxo);
@@ -600,7 +538,7 @@ public class AnaliseConsumoService {
         if (vazamento) {
             ocorrencia.tipo = TipoAlertaEnum.VAZAMENTO_COMUM;
             ocorrencia.gravidade = TipoGravidadeEnum.CRITICO;
-            ocorrencia.volume = arredondar(fluxo.volume);
+            ocorrencia.volume = ConsumoUtil.arredondar(fluxo.volume);
             ocorrencia.motivo = String.format(PT_BR,
                     "Fluxo contínuo de %.0f min, %.0f min deles no período de menor consumo (%s às %s), "
                             + "acima do limite de vazamento (%d min)",
@@ -612,7 +550,7 @@ public class AnaliseConsumoService {
             ocorrencia.gravidade = ausente || vazaoAlta ? TipoGravidadeEnum.CRITICO : TipoGravidadeEnum.ATENCAO;
             // o que passou do limite é desperdício; em ausência ninguém estava usando, então é tudo
             double excedente = ausente ? 1.0 : (foraSeg - limitePontoAbertoSeg) / (double) fluxo.duracaoSeg;
-            ocorrencia.volume = arredondar(fluxo.volume * excedente);
+            ocorrencia.volume = ConsumoUtil.arredondar(fluxo.volume * excedente);
             ocorrencia.motivo = String.format(PT_BR,
                     "Fluxo contínuo de %.0f min, %.0f min deles fora do período de menor consumo, "
                             + "acima do limite de ponto aberto (%d min)",
@@ -645,7 +583,7 @@ public class AnaliseConsumoService {
         ocorrencia.tipo = TipoAlertaEnum.FORA_DO_PADRAO;
         ocorrencia.gravidade = consumoMedio > 0 && volume >= consumoMedio * FRACAO_AUSENCIA_CRITICA
                 ? TipoGravidadeEnum.CRITICO : TipoGravidadeEnum.ATENCAO;
-        ocorrencia.volume = arredondar(volume);
+        ocorrencia.volume = ConsumoUtil.arredondar(volume);
         ocorrencia.motivo = String.format(PT_BR, "Consumo de %.1f L em período de ausência da residência", volume);
         return ocorrencia;
     }
@@ -680,7 +618,7 @@ public class AnaliseConsumoService {
         ocorrencia.tipo = TipoAlertaEnum.FORA_DO_PADRAO;
         ocorrencia.gravidade = fator >= FATOR_VAZAO_CRITICA ? TipoGravidadeEnum.CRITICO : TipoGravidadeEnum.ATENCAO;
         // desperdício estimado: o que passou do volume que a vazão habitual daria no mesmo tempo
-        ocorrencia.volume = arredondar(Math.max(0, fluxo.volume - vazaoMedia * fluxo.minutos()));
+        ocorrencia.volume = ConsumoUtil.arredondar(Math.max(0, fluxo.volume - vazaoMedia * fluxo.minutos()));
         ocorrencia.motivo = String.format(PT_BR,
                 "Vazão de %.1f L/min por %.0f min, %.1f vez(es) a vazão média da residência (%.1f L/min)",
                 fluxo.vazaoMedia(), fluxo.minutos(), fator, vazaoMedia);
@@ -711,7 +649,7 @@ public class AnaliseConsumoService {
         ocorrencia.inicio = dia.get(0).getDataLeitura().toLocalDate().atStartOfDay(); // chave: o dia analisado
         ocorrencia.tipo = TipoAlertaEnum.FORA_DO_PADRAO;
         ocorrencia.gravidade = critico ? TipoGravidadeEnum.CRITICO : TipoGravidadeEnum.ATENCAO;
-        ocorrencia.volume = arredondar(Math.max(0, total - media));
+        ocorrencia.volume = ConsumoUtil.arredondar(Math.max(0, total - media));
         ocorrencia.motivo = String.format(PT_BR,
                 "Consumo de %.0f L no dia, %.1f vez(es) o consumo médio diário (%.0f L)", total, total / media, media);
         return ocorrencia;
@@ -989,7 +927,7 @@ public class AnaliseConsumoService {
      */
     private void verificarSensores(Residencia residencia, List<Leitura> leituras, LocalDateTime referencia,
                                    List<String> observacoes) {
-        List<Periodo> ausencias = lerAusencias(residencia.getPeriodoAusencia());
+        List<Periodo> ausencias = ConsumoUtil.lerAusencias(residencia.getPeriodoAusencia());
         Duration limite = Duration.ofHours(HORAS_SEM_PASSAGEM_SENSOR);
 
         for (Dispositivo dispositivo : dispositivoDAO.listarPorResidencia(residencia.getIdResidencia())) {
@@ -1107,67 +1045,6 @@ public class AnaliseConsumoService {
         return total;
     }
 
-    /** Arredonda para duas casas decimais. */
-    private double arredondar(double valor) {
-        return Math.round(valor * 100) / 100.0;
-    }
-
-    /**
-     * Lê os períodos de ausência do texto da residência (mesma regra do cálculo do perfil de
-     * consumo).
-     */
-    private List<Periodo> lerAusencias(String texto) {
-        List<Periodo> periodos = new ArrayList<>();
-        if (texto == null || texto.isBlank()) {
-            return periodos;
-        }
-        List<LocalDate> datas = new ArrayList<>();
-        Matcher encontrada = DATA.matcher(texto);
-        while (encontrada.find()) {
-            try {
-                datas.add(encontrada.group(1) != null
-                        ? LocalDate.parse(encontrada.group(1))
-                        : LocalDate.parse(encontrada.group(2), DATA_BR));
-            } catch (DateTimeParseException e) {
-                // data impossível (ex.: 2026-13-45): ignorada
-            }
-        }
-        for (int i = 0; i < datas.size(); i += 2) {
-            LocalDate inicio = datas.get(i);
-            LocalDate fim = i + 1 < datas.size() ? datas.get(i + 1) : inicio;
-            periodos.add(fim.isBefore(inicio) ? new Periodo(fim, inicio) : new Periodo(inicio, fim));
-        }
-        return periodos;
-    }
-
-    /** Diz se o dia cai em algum dos períodos de ausência. */
-    private boolean emAusencia(List<Periodo> ausencias, LocalDate dia) {
-        return ausencias.stream().anyMatch(periodo -> periodo.contem(dia));
-    }
-
-    /**
-     * Lê "yyyy-MM-dd" (início ou fim do dia, conforme {@code fimDoDia}) ou "yyyy-MM-ddTHH:mm[:ss]";
-     * vazio vira {@code null}.
-     *
-     * @throws IllegalArgumentException se o texto não está num desses formatos
-     */
-    private LocalDateTime lerPeriodo(String texto, String campo, boolean fimDoDia) {
-        if (texto == null || texto.isBlank()) {
-            return null;
-        }
-        try {
-            String valor = texto.trim();
-            if (valor.length() == 10) {
-                LocalDate dia = LocalDate.parse(valor);
-                return fimDoDia ? dia.atTime(23, 59, 59) : dia.atStartOfDay();
-            }
-            return LocalDateTime.parse(valor);
-        } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("Data inválida em '" + campo
-                    + "' (use 2026-11-14 ou 2026-11-14T08:00).");
-        }
-    }
-
     /** Busca a residência ou lança "não encontrada". */
     private Residencia exigirResidencia(int idResidencia) {
         Residencia residencia = residenciaDAO.buscarPorId(idResidencia);
@@ -1177,21 +1054,11 @@ public class AnaliseConsumoService {
         return residencia;
     }
 
-    /** Devolve o vínculo do morador com a residência; senão 403. */
-    private MoradorResidencia exigirVinculo(int idMorador, int idResidencia) {
-        MoradorResidencia vinculo = moradorResidenciaDAO.buscarVinculo(idMorador, idResidencia);
-        if (vinculo == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Você não tem acesso à análise de consumo desta residência.");
+    private List<ResidenciaDAO.ResidenciaComVinculo> listarResidencias(int idMorador) {
+        List<ResidenciaDAO.ResidenciaComVinculo> residencias = residenciaDAO.listarPorMorador(idMorador);
+        if (residencias.isEmpty()) {
+            throw new IllegalArgumentException("Nenhuma residência encontrada para o morador informado");
         }
-        return vinculo;
-    }
-
-    /** Como {@link #exigirVinculo}, mas o vínculo precisa ser de titular. */
-    private void exigirTitular(int idMorador, int idResidencia) {
-        if (!exigirVinculo(idMorador, idResidencia).isTitular()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Apenas o titular da residência pode executar a análise de consumo.");
-        }
+        return residencias;
     }
 }

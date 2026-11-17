@@ -7,13 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Conta do morador: cadastro, login, dados, senha e desativação. Não há sessão nem autenticação
- * obrigatória: as operações identificam o morador pelo {@code id} da URL.
- *
- * <p>Respostas de erro: 404 para morador inexistente, 409 para e-mail já cadastrado, 401 para
- * credenciais inválidas no login, 400 para validação e 500 para falha interna.</p>
- */
+/** Conta do morador: cadastro, login, dados, senha e desativação. */
 @CrossOrigin("*")
 @RestController
 public class MoradorController {
@@ -46,11 +40,7 @@ public class MoradorController {
         }
     }
 
-    /**
-     * Valida e-mail e senha e devolve os dados do morador. Não cria sessão, cookie nem token para
-     * as
-     * demais rotas.
-     */
+    /** Valida e-mail e senha e devolve os dados do morador. */
     @PostMapping("/auth/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest login) {
         try {
@@ -61,11 +51,7 @@ public class MoradorController {
         }
     }
 
-    /**
-     * Encerra a sessão. Como o login não cria nada no servidor, não há o que invalidar: o cliente
-     * descarta
-     * os dados do morador e a resposta é só a confirmação.
-     */
+    /** Encerra a sessão. */
     @PostMapping("/auth/logout")
     public ResponseEntity<Void> logout() {
         return ResponseEntity.ok().build();
@@ -113,10 +99,7 @@ public class MoradorController {
         }
     }
 
-    /**
-     * Desativa a conta ({@code INATIVA}) depois de confirmar a senha; a conta e o histórico não são
-     * apagados.
-     */
+    /** Desativa a conta ({@code INATIVA}) depois de confirmar a senha; a conta e o histórico não são apagados. */
     @PutMapping("/moradores/{id}/desativar")
     public ResponseEntity<String> desativarConta(
             @PathVariable int id,
@@ -132,9 +115,7 @@ public class MoradorController {
         }
     }
 
-    /**
-     * Recurso inexistente vira 404; repetição vira 409; qualquer outra falha de validação vira 400.
-     */
+    /** Recurso inexistente vira 404; repetição vira 409; qualquer outra falha de validação vira 400. */
     private ResponseEntity<String> erro(IllegalArgumentException e, String contexto) {
         String mensagem = e.getMessage();
         if (mensagem != null && mensagem.contains("não encontrad")) {

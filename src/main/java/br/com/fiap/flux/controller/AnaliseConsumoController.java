@@ -5,15 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Análise simulada de consumo, por morador. Os endpoints não exigem login. A análise também roda
- * sozinha a cada poucos minutos e quando entram leituras novas; estes endpoints servem para pedir
- * uma
- * execução na hora e consultar o resultado.
- *
- * <p>Respostas de erro: 404 para recurso inexistente, 400 para validação e 500 para falha
- * interna.</p>
- */
+/** Análise simulada de consumo, por morador. */
 @CrossOrigin("*")
 @RestController
 public class AnaliseConsumoController {
@@ -33,9 +25,7 @@ public class AnaliseConsumoController {
         }
     }
 
-    /**
-     * Resultado atual da análise das residências vinculadas ao morador. Só calcula: não grava nada.
-     */
+    /** Resultado atual da análise das residências vinculadas ao morador. */
     @GetMapping("/residencias/analise/resultado/morador/{idMorador}")
     public ResponseEntity<?> resultado(@PathVariable int idMorador) {
         try {
@@ -48,10 +38,7 @@ public class AnaliseConsumoController {
         }
     }
 
-    /**
-     * Histórico de alertas de todas as residências vinculadas ao morador, com filtro opcional de
-     * período.
-     */
+    /** Histórico de alertas de todas as residências vinculadas ao morador, com filtro opcional de período. */
     @GetMapping("/residencias/analise/historico/morador/{idMorador}")
     public ResponseEntity<?> historico(
             @PathVariable int idMorador,
@@ -67,10 +54,7 @@ public class AnaliseConsumoController {
         }
     }
 
-    /**
-     * Executa a análise em todas as residências com dispositivo. É uma operação administrativa, de
-     * demonstração.
-     */
+    /** Executa a análise em todas as residências com dispositivo. */
     @PostMapping("/analises/executar-todas")
     public ResponseEntity<?> executarTodas() {
         try {

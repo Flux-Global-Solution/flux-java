@@ -1,23 +1,19 @@
 package br.com.fiap.flux.service;
 
 import br.com.fiap.flux.dao.LeituraDAO;
-import br.com.fiap.flux.dao.MoradorResidenciaDAO;
 import br.com.fiap.flux.dao.PerfilConsumoDAO;
 import br.com.fiap.flux.dao.ResidenciaDAO;
 import br.com.fiap.flux.dto.PerfilConsumoResponseDTO;
 import br.com.fiap.flux.mapper.PerfilConsumoMapper;
 import br.com.fiap.flux.models.Leitura;
-import br.com.fiap.flux.models.MoradorResidencia;
 import br.com.fiap.flux.models.PerfilConsumo;
 import br.com.fiap.flux.models.Residencia;
-import org.springframework.http.HttpStatus;
+import br.com.fiap.flux.util.ConsumoUtil;
+import br.com.fiap.flux.util.ConsumoUtil.Periodo;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -26,8 +22,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Cálculo e consulta do perfil de consumo das residências, feitos só com as leituras do banco (sem
@@ -65,38 +59,20 @@ public class PerfilConsumoService {
     private static final double FATOR_FIM_DE_SEMANA = 1.25;
     private static final int TAMANHO_MAXIMO_PADRAO = 255;
     private static final Locale PT_BR = Locale.forLanguageTag("pt-BR");
-    private static final Pattern DATA = Pattern.compile("(\\d{4}-\\d{2}-\\d{2})|(\\d{2}/\\d{2}/\\d{4})");
-    private static final DateTimeFormatter DATA_BR = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-
-    /** Intervalo de datas (inclusivo) em que a residência estava ausente. */
-    private record Periodo(LocalDate inicio, LocalDate fim) {
-        boolean contem(LocalDate dia) {
-            return !dia.isBefore(inicio) && !dia.isAfter(fim);
-        }
-    }
 
     private final PerfilConsumoDAO perfilDAO;
     private final LeituraDAO leituraDAO;
     private final ResidenciaDAO residenciaDAO;
-    private final MoradorResidenciaDAO moradorResidenciaDAO;
 
     public PerfilConsumoService() {
         this.perfilDAO = new PerfilConsumoDAO();
         this.leituraDAO = new LeituraDAO();
         this.residenciaDAO = new ResidenciaDAO();
-        this.moradorResidenciaDAO = new MoradorResidenciaDAO();
     }
 
-    /**
-     * Consulta o perfil já gravado da residência, sem recalcular. Qualquer morador vinculado pode.
-     *
-     * @throws ResponseStatusException 403 se não houver vínculo
-     * @throws IllegalArgumentException se a residência não existe ou o perfil ainda não foi
-     *     calculado
-     */
-    public PerfilConsumoResponseDTO buscarPorResidencia(int idMorador, int idResidencia) {
+    /** Consulta o perfil já gravado da residência, sem recalcular. */
+    public PerfilConsumoResponseDTO buscarPorResidencia(int idResidencia) {
         exigirResidencia(idResidencia);
-        exigirVinculo(idMorador, idResidencia);
         PerfilConsumo perfil = perfilDAO.buscarPorResidencia(idResidencia);
         if (perfil == null) {
             throw new IllegalArgumentException("Perfil de consumo não encontrado: ainda não foi calculado "
@@ -105,73 +81,24 @@ public class PerfilConsumoService {
         return PerfilConsumoMapper.toDto(perfil);
     }
 
-    /**
-     * Consulta o perfil pelo identificador, sem recalcular. Qualquer morador vinculado à residência
-     * pode.
-     *
-     * @throws ResponseStatusException 403 se não houver vínculo
-     * @throws IllegalArgumentException se o perfil não existe
-     */
-    public PerfilConsumoResponseDTO buscarPorId(int idMorador, int idPerfilConsumo) {
-        PerfilConsumo perfil = buscarExistente(idPerfilConsumo);
-        exigirVinculo(idMorador, perfil.getResidencia().getIdResidencia());
-        return PerfilConsumoMapper.toDto(perfil);
+    /** Consulta o perfil pelo identificador, sem recalcular. */
+    public PerfilConsumoResponseDTO buscarPorId(int idPerfilConsumo) {
+        return PerfilConsumoMapper.toDto(buscarExistente(idPerfilConsumo));
     }
 
-    /**
-     * Gera o perfil da residência ou, se já existe, recalcula o mesmo. Só o titular.
-     *
-     * @throws ResponseStatusException 403 se não for o titular
-     * @throws IllegalArgumentException se a residência não existe
-     */
-    public PerfilConsumoResponseDTO calcular(int idMorador, int idResidencia) {
-        Residencia residencia = exigirResidencia(idResidencia);
-        exigirTitular(idMorador, idResidencia);
-        return PerfilConsumoMapper.toDto(recalcular(residencia));
-    }
-
-    /**
-     * Atualiza o perfil recalculando-o com as leituras de agora. Os valores nunca vêm do cliente:
-     * consumo
-     * médio, vazão e desvio não podem ser informados à mão. Só o titular.
-     *
-     * @throws ResponseStatusException 403 se não for o titular
-     * @throws IllegalArgumentException se o perfil não existe
-     */
-    public PerfilConsumoResponseDTO atualizar(int idMorador, int idPerfilConsumo) {
-        PerfilConsumo perfil = buscarExistente(idPerfilConsumo);
-        int idResidencia = perfil.getResidencia().getIdResidencia();
-        exigirTitular(idMorador, idResidencia);
+    /** Gera o perfil da residência ou, se já existe, recalcula o mesmo. */
+    public PerfilConsumoResponseDTO calcular(int idResidencia) {
         return PerfilConsumoMapper.toDto(recalcular(exigirResidencia(idResidencia)));
     }
 
     /**
-     * Variante de {@link #buscarPorResidencia(int, int)} sem {@code idMorador}: age em nome do
-     * titular.
+     * Atualiza o perfil recalculando-o com as leituras de agora. Os valores nunca vêm do cliente:
+     * consumo médio, vazão e desvio não podem ser informados à mão.
      */
-    public PerfilConsumoResponseDTO buscarPorResidencia(int idResidencia) {
-        return buscarPorResidencia(moradorResidenciaDAO.buscarIdTitular(idResidencia), idResidencia);
-    }
-
-    /** Variante de {@link #buscarPorId(int, int)} sem {@code idMorador}: age em nome do titular. */
-    public PerfilConsumoResponseDTO buscarPorId(int idPerfilConsumo) {
-        PerfilConsumo perfil = buscarExistente(idPerfilConsumo);
-        int idMorador = moradorResidenciaDAO.buscarIdTitular(perfil.getResidencia().getIdResidencia());
-        return buscarPorId(idMorador, idPerfilConsumo);
-    }
-
-    /** Variante de {@link #calcular(int, int)} sem {@code idMorador}: age em nome do titular. */
-    public PerfilConsumoResponseDTO calcular(int idResidencia) {
-        return calcular(moradorResidenciaDAO.buscarIdTitular(idResidencia), idResidencia);
-    }
-
-    /** Variante de {@link #atualizar(int, int)} sem {@code idMorador}: age em nome do titular. */
     public PerfilConsumoResponseDTO atualizar(int idPerfilConsumo) {
         PerfilConsumo perfil = buscarExistente(idPerfilConsumo);
-        int idMorador = moradorResidenciaDAO.buscarIdTitular(perfil.getResidencia().getIdResidencia());
-        return atualizar(idMorador, idPerfilConsumo);
+        return PerfilConsumoMapper.toDto(recalcular(exigirResidencia(perfil.getResidencia().getIdResidencia())));
     }
-
 
     /**
      * Gera ou atualiza o perfil quando entram leituras novas na residência. Não confere acesso:
@@ -211,10 +138,10 @@ public class PerfilConsumoService {
      * leituras (fora dos períodos de ausência), devolve um perfil vazio e pouco confiável.
      */
     private PerfilConsumo calcularPerfil(Residencia residencia) {
-        List<Periodo> ausencias = lerAusencias(residencia.getPeriodoAusencia());
+        List<Periodo> ausencias = ConsumoUtil.lerAusencias(residencia.getPeriodoAusencia());
         List<Leitura> validas = leituraDAO.listarFiltrado(residencia.getIdResidencia(), null, null, null, null)
                 .stream()
-                .filter(l -> !emAusencia(ausencias, l.getDataLeitura().toLocalDate()))
+                .filter(l -> !ConsumoUtil.emAusencia(ausencias, l.getDataLeitura().toLocalDate()))
                 .toList();
 
         PerfilConsumo perfil = new PerfilConsumo();
@@ -233,7 +160,7 @@ public class PerfilConsumoService {
                 ? ultimo.minusDays(MAXIMO_DIAS_ANALISADOS - 1) : primeiro;
         Map<LocalDate, Double> totalPorDia = new TreeMap<>();
         for (LocalDate dia = inicio; !dia.isAfter(ultimo); dia = dia.plusDays(1)) {
-            if (!emAusencia(ausencias, dia)) {
+            if (!ConsumoUtil.emAusencia(ausencias, dia)) {
                 totalPorDia.put(dia, 0.0);
             }
         }
@@ -275,9 +202,9 @@ public class PerfilConsumoService {
         long diasComConsumo = totais.stream().filter(total -> total > 0).count();
         boolean suficiente = diasComConsumo >= MINIMO_DIAS_HISTORICO;
 
-        perfil.setConsumoMedio(arredondar(consumoMedio));
-        perfil.setVazaoMedia(arredondar(vazaoMedia));
-        perfil.setDesvioPadrao(arredondar(desvioPadrao));
+        perfil.setConsumoMedio(ConsumoUtil.arredondar(consumoMedio));
+        perfil.setVazaoMedia(ConsumoUtil.arredondar(vazaoMedia));
+        perfil.setDesvioPadrao(ConsumoUtil.arredondar(desvioPadrao));
         perfil.setHistoricoSuficiente(suficiente ? 1 : 0);
         perfil.setPadraoConsumo(descreverPadrao(residencia, consumoMedio, litrosPorHora, totaisBase,
                 diasAtipicos.size(), diasComConsumo, suficiente));
@@ -347,39 +274,6 @@ public class PerfilConsumoService {
         return texto.length() > TAMANHO_MAXIMO_PADRAO ? texto.substring(0, TAMANHO_MAXIMO_PADRAO) : texto;
     }
 
-    /**
-     * Lê os períodos de ausência do texto da residência; o que não for data é ignorado. Uma data
-     * sobrando no fim vira um período de um dia só, e um par invertido é corrigido.
-     */
-    private List<Periodo> lerAusencias(String texto) {
-        List<Periodo> periodos = new ArrayList<>();
-        if (texto == null || texto.isBlank()) {
-            return periodos;
-        }
-        List<LocalDate> datas = new ArrayList<>();
-        Matcher encontrada = DATA.matcher(texto);
-        while (encontrada.find()) {
-            try {
-                datas.add(encontrada.group(1) != null
-                        ? LocalDate.parse(encontrada.group(1))
-                        : LocalDate.parse(encontrada.group(2), DATA_BR));
-            } catch (DateTimeParseException e) {
-                // data impossível (ex.: 2026-13-45): ignorada
-            }
-        }
-        for (int i = 0; i < datas.size(); i += 2) {
-            LocalDate inicio = datas.get(i);
-            LocalDate fim = i + 1 < datas.size() ? datas.get(i + 1) : inicio;
-            periodos.add(fim.isBefore(inicio) ? new Periodo(fim, inicio) : new Periodo(inicio, fim));
-        }
-        return periodos;
-    }
-
-    /** Diz se o dia cai em algum dos períodos de ausência. */
-    private boolean emAusencia(List<Periodo> ausencias, LocalDate dia) {
-        return ausencias.stream().anyMatch(periodo -> periodo.contem(dia));
-    }
-
     private double media(List<Double> valores) {
         return valores.isEmpty() ? 0 : valores.stream().mapToDouble(Double::doubleValue).sum() / valores.size();
     }
@@ -406,11 +300,6 @@ public class PerfilConsumoService {
         return valores.size() % 2 == 1 ? valores.get(meio) : (valores.get(meio - 1) + valores.get(meio)) / 2;
     }
 
-    /** Arredonda para duas casas decimais. */
-    private double arredondar(double valor) {
-        return Math.round(valor * 100) / 100.0;
-    }
-
     /** Busca a residência ou lança "não encontrada". */
     private Residencia exigirResidencia(int idResidencia) {
         Residencia residencia = residenciaDAO.buscarPorId(idResidencia);
@@ -427,23 +316,5 @@ public class PerfilConsumoService {
             throw new IllegalArgumentException("Perfil de consumo não encontrado");
         }
         return perfil;
-    }
-
-    /** Devolve o vínculo do morador com a residência; senão 403. */
-    private MoradorResidencia exigirVinculo(int idMorador, int idResidencia) {
-        MoradorResidencia vinculo = moradorResidenciaDAO.buscarVinculo(idMorador, idResidencia);
-        if (vinculo == null) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Você não tem acesso ao perfil de consumo desta residência.");
-        }
-        return vinculo;
-    }
-
-    /** Como {@link #exigirVinculo}, mas o vínculo precisa ser de titular. */
-    private void exigirTitular(int idMorador, int idResidencia) {
-        if (!exigirVinculo(idMorador, idResidencia).isTitular()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Apenas o titular da residência pode gerar ou atualizar o perfil de consumo.");
-        }
     }
 }

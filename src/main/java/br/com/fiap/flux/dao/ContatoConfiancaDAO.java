@@ -24,17 +24,21 @@ public class ContatoConfiancaDAO {
      * Cadastra um novo contato. O id gerado é preenchido no próprio objeto.
      *
      * @param contato contato a ser cadastrado
-     * @throws IllegalStateException se o banco falhar
      */
     public void cadastrar(ContatoConfianca contato) {
-        String sql = "INSERT INTO Contato_Confianca (nm_contato, nr_telefone, ds_email, ds_tipo_contato) " +
-                "VALUES (?, ?, ?, ?)";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql, new String[]{"ID_CONTATO"})) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            String sql = "INSERT INTO Contato_Confianca (nm_contato, ds_telefone, ds_email, ds_tipo_contato) " +
+                    "VALUES (?, ?, ?, ?)";
+
+            ps = conexao.prepareStatement(sql, new String[]{"ID_CONTATO"});
             ps.setString(1, contato.getNome());
             ps.setString(2, contato.getTelefone());
             ps.setString(3, contato.getEmail());
             ps.setString(4, contato.getTipoContato().toString());
+
             ps.executeUpdate();
 
             try (ResultSet rsGerado = ps.getGeneratedKeys()) {
@@ -42,9 +46,18 @@ public class ContatoConfiancaDAO {
                     contato.setIdContato(rsGerado.getInt(1));
                 }
             }
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível cadastrar o contato.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -52,22 +65,35 @@ public class ContatoConfiancaDAO {
      * Atualiza os dados de um contato já cadastrado.
      *
      * @param contato contato com os dados atualizados (o id é usado como referência)
-     * @throws IllegalStateException se o banco falhar
      */
     public void alterar(ContatoConfianca contato) {
-        String sql = "UPDATE Contato_Confianca SET nm_contato = ?, nr_telefone = ?, ds_email = ?, " +
-                "ds_tipo_contato = ? WHERE id_contato = ?";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            String sql = "UPDATE Contato_Confianca SET nm_contato = ?, ds_telefone = ?, ds_email = ?, " +
+                    "ds_tipo_contato = ? WHERE id_contato = ?";
+
+            ps = conexao.prepareStatement(sql);
             ps.setString(1, contato.getNome());
             ps.setString(2, contato.getTelefone());
             ps.setString(3, contato.getEmail());
             ps.setString(4, contato.getTipoContato().toString());
             ps.setInt(5, contato.getIdContato());
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível atualizar o contato.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -77,7 +103,6 @@ public class ContatoConfiancaDAO {
      * histórico: se existirem, a chave estrangeira barra a exclusão e nada é apagado.
      *
      * @param idContato identificador do contato a ser removido
-     * @throws IllegalStateException se o banco falhar (nada é apagado)
      */
     public void excluirComAutorizacoesPendentes(int idContato) {
         String[] comandos = {
@@ -85,27 +110,36 @@ public class ContatoConfiancaDAO {
                 "DELETE FROM Contato_Confianca WHERE id_contato = ?"
         };
 
-        try (Connection con = ConnectionFactory.obterConexao()) {
+        Connection conexao = ConnectionFactory.obterConexao();
+
+        try {
             boolean confirmado = false;
             try {
-                con.setAutoCommit(false);
+                conexao.setAutoCommit(false);
                 for (String sql : comandos) {
-                    try (PreparedStatement ps = con.prepareStatement(sql)) {
+                    try (PreparedStatement ps = conexao.prepareStatement(sql)) {
                         ps.setInt(1, idContato);
                         ps.executeUpdate();
                     }
                 }
-                con.commit();
+                conexao.commit();
                 confirmado = true;
             } finally {
                 if (!confirmado) {
-                    con.rollback();
+                    conexao.rollback();
                 }
-                con.setAutoCommit(true);
+                conexao.setAutoCommit(true);
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível excluir o contato.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -114,19 +148,36 @@ public class ContatoConfiancaDAO {
      *
      * @param idContato identificador do contato
      * @return o contato encontrado, ou {@code null} caso não exista
-     * @throws IllegalStateException se o banco falhar
      */
     public ContatoConfianca buscarPorId(int idContato) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Contato_Confianca WHERE id_contato = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        ContatoConfianca contato = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Contato_Confianca WHERE id_contato = ?");
             ps.setInt(1, idContato);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? montar(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                contato = montar(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar o contato.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return contato;
     }
 
     /**
@@ -135,7 +186,6 @@ public class ContatoConfiancaDAO {
      *
      * @param idMorador identificador do morador
      * @return contatos do morador
-     * @throws IllegalStateException se o banco falhar
      */
     public List<ContatoConfianca> listarPorMorador(int idMorador) {
         List<ContatoConfianca> contatos = new ArrayList<>();
@@ -143,17 +193,32 @@ public class ContatoConfiancaDAO {
                 "JOIN Autorizacao_Contato ac ON ac.id_contato = c.id_contato " +
                 "JOIN Morador_Residencia mr ON mr.id_morador_residencia = ac.id_morador_residencia " +
                 "WHERE mr.id_morador = ? ORDER BY c.id_contato";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, idMorador);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    contatos.add(montar(rs));
-                }
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+                contatos.add(montar(rs));
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar os contatos.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return contatos;
     }
@@ -162,22 +227,33 @@ public class ContatoConfiancaDAO {
      * Lista todos os contatos cadastrados, em uma única consulta.
      *
      * @return lista de contatos cadastrados
-     * @throws IllegalStateException se o banco falhar
      */
     public List<ContatoConfianca> listar() {
         List<ContatoConfianca> contatos = new ArrayList<>();
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
 
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Contato_Confianca");
-             ResultSet rs = ps.executeQuery()) {
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Contato_Confianca");
+            ResultSet rs = ps.executeQuery();
 
             while (rs.next()) {
                 contatos.add(montar(rs));
             }
 
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar os contatos.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return contatos;
     }
@@ -187,7 +263,6 @@ public class ContatoConfiancaDAO {
      *
      * @param idContato identificador do contato
      * @return total de autorizações do contato
-     * @throws IllegalStateException se o banco falhar
      */
     public int contarAutorizacoes(int idContato) {
         return contar("SELECT COUNT(*) FROM Autorizacao_Contato WHERE id_contato = ?", idContato, null);
@@ -199,7 +274,6 @@ public class ContatoConfiancaDAO {
      * @param idContato identificador do contato
      * @param idMorador identificador do morador
      * @return total de autorizações do contato nos vínculos do morador
-     * @throws IllegalStateException se o banco falhar
      */
     public int contarAutorizacoesDoMorador(int idContato, int idMorador) {
         return contar("SELECT COUNT(*) FROM Autorizacao_Contato ac " +
@@ -213,7 +287,6 @@ public class ContatoConfiancaDAO {
      *
      * @param idContato identificador do contato
      * @return total de autorizações que não estão pendentes
-     * @throws IllegalStateException se o banco falhar
      */
     public int contarAutorizacoesNaoPendentes(int idContato) {
         return contar("SELECT COUNT(*) FROM Autorizacao_Contato WHERE id_contato = ? " +
@@ -225,7 +298,6 @@ public class ContatoConfiancaDAO {
      *
      * @param idContato identificador do contato
      * @return total de notificações do contato
-     * @throws IllegalStateException se o banco falhar
      */
     public int contarNotificacoes(int idContato) {
         return contar("SELECT COUNT(*) FROM Notificacao WHERE id_contato = ?", idContato, null);
@@ -238,22 +310,39 @@ public class ContatoConfiancaDAO {
      * @param primeiro valor do primeiro parâmetro
      * @param segundo  valor do segundo parâmetro, ou {@code null} se a consulta tem só um
      * @return o resultado da contagem
-     * @throws IllegalStateException se o banco falhar
      */
     private int contar(String sql, int primeiro, Integer segundo) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        int total = 0;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, primeiro);
             if (segundo != null) {
                 ps.setInt(2, segundo);
             }
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? rs.getInt(1) : 0;
+
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                total = rs.getInt(1);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar os vínculos do contato.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return total;
     }
 
     /**
@@ -267,7 +356,7 @@ public class ContatoConfiancaDAO {
         ContatoConfianca contato = new ContatoConfianca();
         contato.setIdContato(rs.getInt("id_contato"));
         contato.setNome(rs.getString("nm_contato"));
-        contato.setTelefone(rs.getString("nr_telefone"));
+        contato.setTelefone(rs.getString("ds_telefone"));
         contato.setEmail(rs.getString("ds_email"));
         contato.setTipoContato(TipoContatoEnum.valueOf(rs.getString("ds_tipo_contato")));
         return contato;

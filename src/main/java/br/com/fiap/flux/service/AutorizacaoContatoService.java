@@ -3,6 +3,7 @@ package br.com.fiap.flux.service;
 import br.com.fiap.flux.dao.AutorizacaoContatoDAO;
 import br.com.fiap.flux.dao.ContatoConfiancaDAO;
 import br.com.fiap.flux.dao.MoradorResidenciaDAO;
+import br.com.fiap.flux.dao.ResidenciaDAO;
 import br.com.fiap.flux.dto.AutorizacaoContatoRequestDTO;
 import br.com.fiap.flux.dto.AutorizacaoContatoResponseDTO;
 import br.com.fiap.flux.enums.StatusAutorizacaoEnum;
@@ -18,12 +19,9 @@ import java.util.List;
 
 /**
  * Autorizações para um contato de confiança receber avisos de uma residência. A autorização fica
- * presa ao vínculo (Morador_Residencia) do titular e só a ATIVA gera notificação. Revogar não apaga
+ * presa ao vínculo (Morador_Residencia) do morador e só a ATIVA gera notificação. Revogar não apaga
  * nada: muda o status e registra a data, e a linha continua como histórico.
- *
- * <p>As operações com {@code idMorador} conferem se ele é titular da residência. As variantes só
- * com
- * o id da autorização (ou da residência) agem em nome do titular, que é resolvido internamente.</p>
+ * Solicitar uma autorização exige que o morador informado tenha vínculo com a residência.
  */
 @Service
 public class AutorizacaoContatoService {
@@ -31,31 +29,25 @@ public class AutorizacaoContatoService {
     private final AutorizacaoContatoDAO autorizacaoDAO;
     private final ContatoConfiancaDAO contatoDAO;
     private final MoradorResidenciaDAO moradorResidenciaDAO;
+    private final ResidenciaDAO residenciaDAO;
 
     public AutorizacaoContatoService() {
         this.autorizacaoDAO = new AutorizacaoContatoDAO();
         this.contatoDAO = new ContatoConfiancaDAO();
         this.moradorResidenciaDAO = new MoradorResidenciaDAO();
+        this.residenciaDAO = new ResidenciaDAO();
     }
 
     /**
-     * Solicita a autorização de um contato numa residência. Nasce PENDENTE, sem datas, no vínculo
-     * do
-     * titular. O mesmo contato pode ser ligado a várias residências do mesmo titular, cada uma com
-     * a sua
-     * autorização.
-     *
-     * @throws ResponseStatusException 403 se não for o titular da residência ou o contato for de
-     *     outro usuário
-     * @throws IllegalArgumentException se contato ou residência faltam ou o contato não existe
-     * @throws IllegalStateException se o banco não gravar a autorização
+     * Solicita a autorização de um contato numa residência. Nasce PENDENTE, sem datas, no vínculo do
+     * morador. O mesmo contato pode ser ligado a várias residências do mesmo morador, cada uma com a
+     * sua autorização.
      */
     public AutorizacaoContatoResponseDTO solicitar(int idMorador, AutorizacaoContatoRequestDTO dto) {
         if (dto.idContato() == null || dto.idResidencia() == null) {
-            System.out.println("ERRO: Contato e residência são obrigatórios");
             throw new IllegalArgumentException("O contato e a residência são obrigatórios.");
         }
-        MoradorResidencia vinculo = exigirTitular(idMorador, dto.idResidencia());
+        MoradorResidencia vinculo = verificarVinculo(idMorador, dto.idResidencia());
 
         ContatoConfianca contato = contatoDAO.buscarPorId(dto.idContato());
         if (contato == null) {
@@ -74,48 +66,35 @@ public class AutorizacaoContatoService {
         if (autorizacao.getIdAutorizacao() == 0) {
             throw new IllegalStateException("Não foi possível gravar a autorização.");
         }
-        return buscarPorId(idMorador, autorizacao.getIdAutorizacao());
+        return buscarPorId(autorizacao.getIdAutorizacao());
     }
 
     /**
-     * Lista as autorizações da residência (só o titular vê). Com {@code status}, PENDENTE traz as
-     * aguardando ativação e ATIVA traz os contatos que recebem notificações.
-     *
-     * @throws ResponseStatusException 403 se não for o titular
+     * Lista as autorizações da residência. Com {@code status}, PENDENTE traz as aguardando ativação e
+     * ATIVA traz os contatos que recebem notificações.
      */
-    public List<AutorizacaoContatoResponseDTO> listarPorResidencia(int idMorador, int idResidencia,
-                                                                   StatusAutorizacaoEnum status) {
-        exigirTitular(idMorador, idResidencia);
+    public List<AutorizacaoContatoResponseDTO> listarPorResidencia(int idResidencia, StatusAutorizacaoEnum status) {
+        if (residenciaDAO.buscarPorId(idResidencia) == null) {
+            throw new IllegalArgumentException("Residência não encontrada");
+        }
         return autorizacaoDAO.listarPorResidencia(idResidencia, status)
                 .stream()
                 .map(AutorizacaoContatoMapper::toDto)
                 .toList();
     }
 
-    /**
-     * Consulta uma autorização; só o titular da residência dela pode.
-     *
-     * @throws ResponseStatusException 403 se não for o titular
-     * @throws IllegalArgumentException se a autorização não existe
-     */
-    public AutorizacaoContatoResponseDTO buscarPorId(int idMorador, int idAutorizacao) {
-        AutorizacaoContato autorizacao = buscarExistente(idAutorizacao);
-        exigirTitular(idMorador, autorizacao.getMoradorResidencia().getResidencia().getIdResidencia());
-        return AutorizacaoContatoMapper.toDto(autorizacao);
+    /** Consulta uma autorização. */
+    public AutorizacaoContatoResponseDTO buscarPorId(int idAutorizacao) {
+        return AutorizacaoContatoMapper.toDto(buscarExistente(idAutorizacao));
     }
 
     /**
-     * Ativa a autorização e registra a data. Vale para PENDENTE e também para REVOGADA (nova
-     * autorização
-     * do mesmo contato, já que o banco não permite uma segunda linha); nesse caso a data de
-     * revogação é
-     * limpa, como o CHECK da tabela exige.
-     *
-     * @throws ResponseStatusException 403 se não for o titular; 409 se a autorização já está ativa
+     * Ativa a autorização e registra a data. Vale para PENDENTE e também para REVOGADA (nova autorização
+     * do mesmo contato, já que o banco não permite uma segunda linha); nesse caso a data de revogação é
+     * limpa, como o CHECK da tabela exige. Se já está ativa, 409.
      */
-    public AutorizacaoContatoResponseDTO ativar(int idMorador, int idAutorizacao) {
+    public AutorizacaoContatoResponseDTO ativar(int idAutorizacao) {
         AutorizacaoContato autorizacao = buscarExistente(idAutorizacao);
-        exigirTitular(idMorador, autorizacao.getMoradorResidencia().getResidencia().getIdResidencia());
 
         if (autorizacao.estaAtiva()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "A autorização já está ativa.");
@@ -127,13 +106,10 @@ public class AutorizacaoContatoService {
 
     /**
      * Revoga a autorização: status REVOGADA e data de revogação preenchida. A linha permanece como
-     * histórico.
-     *
-     * @throws ResponseStatusException 403 se não for o titular; 409 se já foi revogada
+     * histórico. Se já foi revogada, 409.
      */
-    public AutorizacaoContatoResponseDTO revogar(int idMorador, int idAutorizacao) {
+    public AutorizacaoContatoResponseDTO revogar(int idAutorizacao) {
         AutorizacaoContato autorizacao = buscarExistente(idAutorizacao);
-        exigirTitular(idMorador, autorizacao.getMoradorResidencia().getResidencia().getIdResidencia());
 
         if (autorizacao.getStatusAutorizacao() == StatusAutorizacaoEnum.REVOGADA) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "A autorização já foi revogada.");
@@ -142,37 +118,6 @@ public class AutorizacaoContatoService {
         autorizacaoDAO.alterar(autorizacao);
         return AutorizacaoContatoMapper.toDto(buscarExistente(idAutorizacao));
     }
-
-    /**
-     * Variante de {@link #listarPorResidencia(int, int, StatusAutorizacaoEnum)} sem {@code
-     * idMorador}:
-     * age em nome do titular da residência.
-     */
-    public List<AutorizacaoContatoResponseDTO> listarPorResidencia(int idResidencia, StatusAutorizacaoEnum status) {
-        return listarPorResidencia(moradorResidenciaDAO.buscarIdTitular(idResidencia), idResidencia, status);
-    }
-
-    /** Variante de {@link #buscarPorId(int, int)} sem {@code idMorador}: age em nome do titular. */
-    public AutorizacaoContatoResponseDTO buscarPorId(int idAutorizacao) {
-        AutorizacaoContato autorizacao = buscarExistente(idAutorizacao);
-        int idResidencia = autorizacao.getMoradorResidencia().getResidencia().getIdResidencia();
-        return buscarPorId(moradorResidenciaDAO.buscarIdTitular(idResidencia), idAutorizacao);
-    }
-
-    /** Variante de {@link #ativar(int, int)} sem {@code idMorador}: age em nome do titular. */
-    public AutorizacaoContatoResponseDTO ativar(int idAutorizacao) {
-        AutorizacaoContato autorizacao = buscarExistente(idAutorizacao);
-        int idResidencia = autorizacao.getMoradorResidencia().getResidencia().getIdResidencia();
-        return ativar(moradorResidenciaDAO.buscarIdTitular(idResidencia), idAutorizacao);
-    }
-
-    /** Variante de {@link #revogar(int, int)} sem {@code idMorador}: age em nome do titular. */
-    public AutorizacaoContatoResponseDTO revogar(int idAutorizacao) {
-        AutorizacaoContato autorizacao = buscarExistente(idAutorizacao);
-        int idResidencia = autorizacao.getMoradorResidencia().getResidencia().getIdResidencia();
-        return revogar(moradorResidenciaDAO.buscarIdTitular(idResidencia), idAutorizacao);
-    }
-
 
     /** Busca a autorização ou lança "não encontrada". */
     private AutorizacaoContato buscarExistente(int idAutorizacao) {
@@ -183,16 +128,11 @@ public class AutorizacaoContatoService {
         return autorizacao;
     }
 
-    /**
-     * Devolve o vínculo do morador com a residência se ele for titular; senão 403 (inclui
-     * residência
-     * de terceiros).
-     */
-    private MoradorResidencia exigirTitular(int idMorador, int idResidencia) {
+    // a autorização fica presa ao vínculo do morador com a residência
+    private MoradorResidencia verificarVinculo(int idMorador, int idResidencia) {
         MoradorResidencia vinculo = moradorResidenciaDAO.buscarVinculo(idMorador, idResidencia);
-        if (vinculo == null || !vinculo.isTitular()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Apenas o titular da residência pode gerenciar as autorizações de contatos.");
+        if (vinculo == null) {
+            throw new IllegalArgumentException("Vínculo do morador com a residência não encontrado");
         }
         return vinculo;
     }

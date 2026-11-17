@@ -1,4 +1,3 @@
-
 package br.com.fiap.flux.controller;
 
 import br.com.fiap.flux.enums.StatusAlertaEnum;
@@ -9,26 +8,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * Ocorrências (alertas de consumo) de uma residência: consulta, histórico e acompanhamento do
- * andamento. Os alertas são criados pela análise de consumo, não por estes endpoints, e eles não
- * exigem
- * login.
- *
- * <p>Respostas de erro: 404 para ocorrência ou residência inexistente, 400 para validação, 409 para
- * passagem de status fora de ordem e 500 para falha interna.</p>
- */
+/** Ocorrências (alertas de consumo) de uma residência: consulta, histórico e acompanhamento do andamento. */
 @CrossOrigin("*")
 @RestController
 public class AlertaController {
 
     private final AlertaService service = new AlertaService();
 
-    /**
-     * Lista as ocorrências de uma residência. Os filtros de tipo, gravidade, status e período
-     * ({@code inicio} e {@code fim}, em "2026-11-01" ou "2026-11-01T08:00") são opcionais e se
-     * combinam.
-     */
+    /** Lista as ocorrências de uma residência. */
     @GetMapping("/residencias/{id}/ocorrencias")
     public ResponseEntity<?> listarPorResidencia(
             @PathVariable int id,
@@ -37,13 +24,8 @@ public class AlertaController {
             @RequestParam(required = false) StatusAlertaEnum status,
             @RequestParam(required = false) String inicio,
             @RequestParam(required = false) String fim) {
-
         try {
-            return ResponseEntity.ok(
-                    service.listarPorResidencia(
-                            id, tipo, gravidade, status, inicio, fim
-                    )
-            );
+            return ResponseEntity.ok(service.listarPorResidencia(id, tipo, gravidade, status, inicio, fim));
         } catch (IllegalArgumentException e) {
             return erro(e, "Erro ao listar as ocorrências");
         } catch (IllegalStateException e) {
@@ -55,7 +37,6 @@ public class AlertaController {
     /** Detalhes de uma ocorrência. */
     @GetMapping("/ocorrencias/{id}")
     public ResponseEntity<?> buscarPorId(@PathVariable int id) {
-
         try {
             return ResponseEntity.ok(service.buscarPorId(id));
         } catch (IllegalArgumentException e) {
@@ -66,16 +47,11 @@ public class AlertaController {
         }
     }
 
-    /**
-     * Histórico da residência: só as ocorrências resolvidas, da mais recente para a mais antiga.
-     */
+    /** Histórico da residência: só as ocorrências resolvidas, da mais recente para a mais antiga. */
     @GetMapping("/residencias/{id}/ocorrencias/historico")
     public ResponseEntity<?> listarHistorico(@PathVariable int id) {
-
         try {
-            return ResponseEntity.ok(
-                    service.listarHistoricoPorResidencia(id)
-            );
+            return ResponseEntity.ok(service.listarHistoricoPorResidencia(id));
         } catch (IllegalArgumentException e) {
             return erro(e, "Erro ao consultar o histórico");
         } catch (IllegalStateException e) {
@@ -87,7 +63,6 @@ public class AlertaController {
     /** Reconhece a ocorrência ({@code ABERTO -> RECONHECIDO}). */
     @PutMapping("/ocorrencias/{id}/reconhecer")
     public ResponseEntity<?> reconhecer(@PathVariable int id) {
-
         try {
             return ResponseEntity.ok(service.reconhecer(id));
         } catch (IllegalArgumentException e) {
@@ -101,7 +76,6 @@ public class AlertaController {
     /** Inicia o reparo da ocorrência ({@code RECONHECIDO -> EM_REPARO}). */
     @PutMapping("/ocorrencias/{id}/em-reparo")
     public ResponseEntity<?> iniciarReparo(@PathVariable int id) {
-
         try {
             return ResponseEntity.ok(service.iniciarReparo(id));
         } catch (IllegalArgumentException e) {
@@ -115,7 +89,6 @@ public class AlertaController {
     /** Resolve a ocorrência ({@code EM_REPARO -> RESOLVIDO}). */
     @PutMapping("/ocorrencias/{id}/resolver")
     public ResponseEntity<?> resolver(@PathVariable int id) {
-
         try {
             return ResponseEntity.ok(service.resolver(id));
         } catch (IllegalArgumentException e) {

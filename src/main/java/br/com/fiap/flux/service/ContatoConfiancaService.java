@@ -1,10 +1,9 @@
 package br.com.fiap.flux.service;
 
 import br.com.fiap.flux.dao.ContatoConfiancaDAO;
-import br.com.fiap.flux.dao.ResidenciaDAO;
+import br.com.fiap.flux.dao.MoradorDAO;
 import br.com.fiap.flux.dto.ContatoConfiancaRequestDTO;
 import br.com.fiap.flux.dto.ContatoConfiancaResponseDTO;
-import br.com.fiap.flux.enums.TipoVinculoEnum;
 import br.com.fiap.flux.mapper.ContatoConfiancaMapper;
 import br.com.fiap.flux.models.ContatoConfianca;
 import org.springframework.http.HttpStatus;
@@ -15,7 +14,7 @@ import java.util.List;
 
 /**
  * Cadastro dos contatos de confiança: pessoas ou associações que recebem avisos sem ter conta nem
- * acesso ao aplicativo (não são moradores). Só o titular de alguma residência cadastra contatos.
+ * acesso ao aplicativo (não são moradores). Quem cadastra precisa ser um morador existente.
  *
  * <p>A tabela não guarda quem cadastrou o contato, então o "dono" é quem tem autorizações dele: um
  * contato sem autorização ainda não tem dono (a ligação a uma residência é feita em
@@ -25,22 +24,21 @@ import java.util.List;
 public class ContatoConfiancaService {
 
     private final ContatoConfiancaDAO contatoDAO;
-    private final ResidenciaDAO residenciaDAO;
+    private final MoradorDAO moradorDAO;
 
     public ContatoConfiancaService() {
         this.contatoDAO = new ContatoConfiancaDAO();
-        this.residenciaDAO = new ResidenciaDAO();
+        this.moradorDAO = new MoradorDAO();
     }
 
     /**
      * Cadastra o contato sem associá-lo a nenhuma residência: a autorização é uma operação à parte.
      *
-     * @throws ResponseStatusException 403 se o morador não é titular de nenhuma residência
-     * @throws IllegalArgumentException se os dados são inválidos
+     * @throws IllegalArgumentException se o morador não existe ou os dados são inválidos
      * @throws IllegalStateException se o banco não gravar o contato
      */
     public ContatoConfiancaResponseDTO cadastrar(int idMorador, ContatoConfiancaRequestDTO dto) {
-        exigirTitularDeAlguma(idMorador);
+        verificarMorador(idMorador);
         validar(dto);
 
         ContatoConfianca contato = ContatoConfiancaMapper.dtoToEntity(dto);
@@ -114,31 +112,9 @@ public class ContatoConfiancaService {
         contatoDAO.excluirComAutorizacoesPendentes(idContato);
     }
 
-    /**
-     * Devolve o contato se ele existe e é do morador (todas as autorizações dele estão em vínculos
-     * do
-     * morador); senão 403.
-     */
-    private ContatoConfianca exigirDono(int idMorador, int idContato) {
-        ContatoConfianca contato = contatoDAO.buscarPorId(idContato);
-        if (contato == null) {
-            throw new IllegalArgumentException("Contato não encontrado");
-        }
-        int total = contatoDAO.contarAutorizacoes(idContato);
-        int doMorador = contatoDAO.contarAutorizacoesDoMorador(idContato, idMorador);
-        if (doMorador == 0 || doMorador != total) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Você não tem acesso a este contato.");
-        }
-        return contato;
-    }
-
-    /** Exige que o morador seja titular de ao menos uma residência; senão 403. */
-    private void exigirTitularDeAlguma(int idMorador) {
-        boolean titular = residenciaDAO.listarPorMorador(idMorador).stream()
-                .anyMatch(r -> r.tipoVinculo() == TipoVinculoEnum.TITULAR);
-        if (!titular) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Apenas o titular de uma residência pode gerenciar contatos de confiança.");
+    private void verificarMorador(int idMorador) {
+        if (moradorDAO.buscarPorId(idMorador) == null) {
+            throw new IllegalArgumentException("Morador não encontrado");
         }
     }
 
@@ -156,28 +132,24 @@ public class ContatoConfiancaService {
      */
     private void validar(ContatoConfiancaRequestDTO dto) {
         if (dto.nome() == null || dto.nome().isBlank()) {
-            System.out.println("ERRO: O nome do contato é obrigatório");
             throw new IllegalArgumentException("O nome do contato é obrigatório.");
         }
         if (dto.nome().trim().length() > 100) {
             throw new IllegalArgumentException("O nome deve ter no máximo 100 caracteres.");
         }
         if (dto.telefone() == null || dto.telefone().isBlank()) {
-            System.out.println("ERRO: O telefone do contato é obrigatório");
             throw new IllegalArgumentException("O telefone do contato é obrigatório.");
         }
         if (dto.telefone().trim().length() > 15) {
             throw new IllegalArgumentException("O telefone deve ter no máximo 15 caracteres.");
         }
         if (dto.email() == null || !dto.email().trim().matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
-            System.out.println("ERRO: E-mail do contato inválido");
             throw new IllegalArgumentException("E-mail inválido.");
         }
         if (dto.email().trim().length() > 120) {
             throw new IllegalArgumentException("O e-mail deve ter no máximo 120 caracteres.");
         }
         if (dto.tipoContato() == null) {
-            System.out.println("ERRO: O tipo de contato é obrigatório");
             throw new IllegalArgumentException("O tipo de contato é obrigatório (PESSOA ou ASSOCIACAO).");
         }
     }

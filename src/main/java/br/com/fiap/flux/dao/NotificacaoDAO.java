@@ -35,15 +35,26 @@ public class NotificacaoDAO {
      * Cadastra uma nova notificação. O id gerado é preenchido no próprio objeto.
      *
      * @param notificacao notificação a ser cadastrada
-     * @throws IllegalStateException se o banco falhar
      */
     public void cadastrar(Notificacao notificacao) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(SQL_INSERIR, new String[]{"ID_NOTIFICACAO"})) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(SQL_INSERIR, new String[]{"ID_NOTIFICACAO"});
             inserir(ps, notificacao);
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível cadastrar a notificação.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -52,32 +63,40 @@ public class NotificacaoDAO {
      * gerado de cada uma é preenchido no próprio objeto.
      *
      * @param notificacoes notificações a serem cadastradas
-     * @throws IllegalStateException se o banco falhar (nada é gravado)
      */
     public void cadastrarLote(List<Notificacao> notificacoes) {
-        try (Connection con = ConnectionFactory.obterConexao()) {
+        Connection conexao = ConnectionFactory.obterConexao();
+
+        try {
             boolean confirmado = false;
             try {
-                con.setAutoCommit(false);
-                try (PreparedStatement ps = con.prepareStatement(SQL_INSERIR, new String[]{"ID_NOTIFICACAO"})) {
+                conexao.setAutoCommit(false);
+                try (PreparedStatement ps = conexao.prepareStatement(SQL_INSERIR, new String[]{"ID_NOTIFICACAO"})) {
                     for (Notificacao notificacao : notificacoes) {
                         inserir(ps, notificacao);
                     }
                 }
-                con.commit();
+                conexao.commit();
                 confirmado = true;
             } finally {
                 // Desfaz antes de devolver a conexão: no Oracle, ligar o autocommit com a
                 // transação aberta confirmaria tudo.
                 if (!confirmado) {
-                    con.rollback();
+                    conexao.rollback();
                 }
-                con.setAutoCommit(true);
+                conexao.setAutoCommit(true);
             }
         } catch (SQLException e) {
             e.printStackTrace();
             notificacoes.forEach(n -> n.setIdNotificacao(0));
-            throw new IllegalStateException("Não foi possível cadastrar as notificações.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -85,20 +104,33 @@ public class NotificacaoDAO {
      * Atualiza os dados de uma notificação já cadastrada.
      *
      * @param notificacao notificação com os dados atualizados (o id é usado como referência)
-     * @throws IllegalStateException se o banco falhar
      */
     public void alterar(Notificacao notificacao) {
         String sql = "UPDATE Notificacao SET ds_notificacao = ?, dt_envio = ?, ds_canal = ?, " +
                 "ds_status_envio = ?, id_alerta = ?, id_morador = ?, id_contato = ? " +
                 "WHERE id_notificacao = ?";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             preencher(ps, notificacao);
             ps.setInt(8, notificacao.getIdNotificacao());
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível alterar a notificação.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -106,16 +138,27 @@ public class NotificacaoDAO {
      * Remove uma notificação do banco de dados.
      *
      * @param idNotificacao identificador da notificação a ser removida
-     * @throws IllegalStateException se o banco falhar
      */
     public void excluir(int idNotificacao) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("DELETE FROM Notificacao WHERE id_notificacao = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement("DELETE FROM Notificacao WHERE id_notificacao = ?");
             ps.setInt(1, idNotificacao);
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível excluir a notificação.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -124,19 +167,36 @@ public class NotificacaoDAO {
      *
      * @param idNotificacao identificador da notificação
      * @return a notificação encontrada, ou {@code null} caso não exista
-     * @throws IllegalStateException se o banco falhar
      */
     public Notificacao buscarPorId(int idNotificacao) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Notificacao WHERE id_notificacao = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        Notificacao notificacao = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Notificacao WHERE id_notificacao = ?");
             ps.setInt(1, idNotificacao);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? montar(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                notificacao = montar(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar a notificação.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return notificacao;
     }
 
     /**
@@ -144,22 +204,36 @@ public class NotificacaoDAO {
      *
      * @param idAlerta identificador do alerta
      * @return notificações do alerta
-     * @throws IllegalStateException se o banco falhar
      */
     public List<Notificacao> listarPorAlerta(int idAlerta) {
         List<Notificacao> notificacoes = new ArrayList<>();
         String sql = "SELECT * FROM Notificacao WHERE id_alerta = ? ORDER BY id_notificacao";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, idAlerta);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    notificacoes.add(montar(rs));
-                }
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+                notificacoes.add(montar(rs));
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar as notificações do alerta.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return notificacoes;
     }
@@ -172,7 +246,6 @@ public class NotificacaoDAO {
      * @param idMorador identificador do morador que consulta
      * @param status    status de envio para filtrar, ou {@code null} para trazer todas
      * @return notificações visíveis ao morador
-     * @throws IllegalStateException se o banco falhar
      */
     public List<Notificacao> listarVisiveis(int idMorador, StatusEnvioEnum status) {
         List<Notificacao> notificacoes = new ArrayList<>();
@@ -182,21 +255,36 @@ public class NotificacaoDAO {
                 "AND mr.ds_tipo_vinculo = 'TITULAR')) " +
                 (status != null ? "AND n.ds_status_envio = ? " : "") +
                 "ORDER BY n.id_notificacao DESC";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, idMorador);
             ps.setInt(2, idMorador);
             if (status != null) {
                 ps.setString(3, status.name());
             }
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    notificacoes.add(montar(rs));
-                }
+
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                notificacoes.add(montar(rs));
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar as notificações.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return notificacoes;
     }
@@ -205,22 +293,33 @@ public class NotificacaoDAO {
      * Lista todas as notificações cadastradas, em uma única consulta.
      *
      * @return lista de notificações cadastradas
-     * @throws IllegalStateException se o banco falhar
      */
     public List<Notificacao> listar() {
         List<Notificacao> notificacoes = new ArrayList<>();
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
 
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Notificacao ORDER BY id_notificacao");
-             ResultSet rs = ps.executeQuery()) {
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Notificacao ORDER BY id_notificacao");
+            ResultSet rs = ps.executeQuery();
 
             while (rs.next()) {
                 notificacoes.add(montar(rs));
             }
 
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar as notificações.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return notificacoes;
     }

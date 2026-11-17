@@ -13,13 +13,12 @@ import br.com.fiap.flux.models.Alerta;
 import br.com.fiap.flux.models.Dispositivo;
 import br.com.fiap.flux.models.Morador;
 import br.com.fiap.flux.models.Residencia;
+import br.com.fiap.flux.util.ConsumoUtil;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeParseException;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -71,8 +70,8 @@ public class AlertaService {
             String inicio,
             String fim) {
 
-        LocalDateTime de = lerPeriodo(inicio, "inicio", false);
-        LocalDateTime ate = lerPeriodo(fim, "fim", true);
+        LocalDateTime de = ConsumoUtil.lerPeriodo(inicio, "inicio", false);
+        LocalDateTime ate = ConsumoUtil.lerPeriodo(fim, "fim", true);
 
         if (de != null && ate != null && de.isAfter(ate)) {
             throw new IllegalArgumentException(
@@ -319,42 +318,6 @@ public class AlertaService {
         return AlertaMapper.toDto(
                 completar(buscarExistente(idAlerta))
         );
-    }
-
-    /**
-     * Lê "yyyy-MM-dd" (início ou fim do dia, conforme {@code fimDoDia}) ou "yyyy-MM-ddTHH:mm[:ss]";
-     * vazio vira {@code null}.
-     *
-     * @throws IllegalArgumentException se o texto não está num desses formatos
-     */
-    private LocalDateTime lerPeriodo(
-            String texto,
-            String campo,
-            boolean fimDoDia) {
-
-        if (texto == null || texto.isBlank()) {
-            return null;
-        }
-
-        try {
-            String valor = texto.trim();
-
-            if (valor.length() == 10) {
-                LocalDate dia = LocalDate.parse(valor);
-
-                return fimDoDia
-                        ? dia.atTime(23, 59, 59)
-                        : dia.atStartOfDay();
-            }
-
-            return LocalDateTime.parse(valor);
-
-        } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException(
-                    "Data inválida em '" + campo
-                            + "'. Use yyyy-MM-dd ou yyyy-MM-ddTHH:mm."
-            );
-        }
     }
 
     /** Confirma que a residência existe. */

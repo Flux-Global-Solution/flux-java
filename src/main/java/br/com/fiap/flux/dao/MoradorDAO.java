@@ -21,27 +21,28 @@ import java.util.List;
  */
 public class MoradorDAO {
 
-    private static final int ORA_CHAVE_UNICA = 1;
-
     /**
      * Cadastra um novo morador. O id é gerado pelo banco (IDENTITY) e preenchido no próprio objeto;
      * a data de cadastro usa o padrão da tabela (SYSDATE).
      *
      * @param morador morador a ser cadastrado
-     * @throws IllegalArgumentException se o e-mail já estiver cadastrado
-     * @throws IllegalStateException    se o banco falhar
      */
     public void cadastrar(Morador morador) {
-        String sql = "INSERT INTO Morador (nm_morador, ds_email, ds_senha_hash, " +
-                "nr_telefone, ds_status_conta) " +
-                "VALUES (?, ?, ?, ?, ?)";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql, new String[]{"ID_MORADOR"})) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            String sql = "INSERT INTO Morador (nm_morador, ds_email, ds_senha_hash, " +
+                    "ds_telefone, ds_status_conta) " +
+                    "VALUES (?, ?, ?, ?, ?)";
+
+            ps = conexao.prepareStatement(sql, new String[]{"ID_MORADOR"});
             ps.setString(1, morador.getNome());
             ps.setString(2, morador.getEmail());
             ps.setString(3, morador.getHashSenha());
             ps.setString(4, morador.getTelefone());
             ps.setString(5, morador.getStatusConta().toString());
+
             ps.executeUpdate();
 
             // Recupera o id_morador gerado automaticamente (IDENTITY) e preenche no objeto
@@ -50,12 +51,18 @@ public class MoradorDAO {
                     morador.setIdMorador(rsGerado.getInt(1));
                 }
             }
+            ps.close();
+
         } catch (SQLException e) {
-            if (e.getErrorCode() == ORA_CHAVE_UNICA) {
-                throw new IllegalArgumentException("E-mail já cadastrado.");
-            }
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível cadastrar o morador.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -64,25 +71,34 @@ public class MoradorDAO {
      * status da conta não são alterados aqui.
      *
      * @param morador morador com os dados atualizados (o id é usado como referência)
-     * @throws IllegalArgumentException se o e-mail já pertencer a outro morador
-     * @throws IllegalStateException    se o banco falhar
      */
     public void alterar(Morador morador) {
-        String sql = "UPDATE Morador SET nm_morador = ?, ds_email = ?, nr_telefone = ? " +
-                "WHERE id_morador = ?";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            String sql = "UPDATE Morador SET nm_morador = ?, ds_email = ?, ds_telefone = ? " +
+                    "WHERE id_morador = ?";
+
+            ps = conexao.prepareStatement(sql);
             ps.setString(1, morador.getNome());
             ps.setString(2, morador.getEmail());
             ps.setString(3, morador.getTelefone());
             ps.setInt(4, morador.getIdMorador());
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
-            if (e.getErrorCode() == ORA_CHAVE_UNICA) {
-                throw new IllegalArgumentException("E-mail já cadastrado.");
-            }
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível alterar o morador.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -91,18 +107,29 @@ public class MoradorDAO {
      *
      * @param idMorador identificador do morador
      * @param hashSenha novo hash SHA-256 da senha
-     * @throws IllegalStateException se o banco falhar
      */
     public void alterarSenha(int idMorador, String hashSenha) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(
-                     "UPDATE Morador SET ds_senha_hash = ? WHERE id_morador = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement("UPDATE Morador SET ds_senha_hash = ? WHERE id_morador = ?");
             ps.setString(1, hashSenha);
             ps.setInt(2, idMorador);
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível alterar a senha do morador.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -111,18 +138,29 @@ public class MoradorDAO {
      *
      * @param idMorador identificador do morador
      * @param status    novo status da conta
-     * @throws IllegalStateException se o banco falhar
      */
     public void alterarStatus(int idMorador, StatusContaEnum status) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(
-                     "UPDATE Morador SET ds_status_conta = ? WHERE id_morador = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement("UPDATE Morador SET ds_status_conta = ? WHERE id_morador = ?");
             ps.setString(1, status.name());
             ps.setInt(2, idMorador);
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível alterar o status da conta do morador.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -130,16 +168,27 @@ public class MoradorDAO {
      * Remove um morador do banco de dados.
      *
      * @param idMorador identificador do morador a ser removido
-     * @throws IllegalStateException se o banco falhar
      */
     public void excluir(int idMorador) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("DELETE FROM Morador WHERE id_morador = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement("DELETE FROM Morador WHERE id_morador = ?");
             ps.setInt(1, idMorador);
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível excluir o morador.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -148,19 +197,36 @@ public class MoradorDAO {
      *
      * @param idMorador identificador do morador
      * @return o morador encontrado, ou {@code null} caso não exista
-     * @throws IllegalStateException se o banco falhar
      */
     public Morador buscarPorId(int idMorador) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Morador WHERE id_morador = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        Morador morador = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Morador WHERE id_morador = ?");
             ps.setInt(1, idMorador);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? lerMorador(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                morador = lerMorador(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar o morador.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return morador;
     }
 
     /**
@@ -168,39 +234,70 @@ public class MoradorDAO {
      *
      * @param email e-mail do morador
      * @return o morador encontrado, ou {@code null} caso não exista
-     * @throws IllegalStateException se o banco falhar
      */
     public Morador buscarPorEmail(String email) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Morador WHERE LOWER(ds_email) = LOWER(?) " +
-                     "ORDER BY id_morador FETCH FIRST 1 ROWS ONLY")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        Morador morador = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Morador WHERE LOWER(ds_email) = LOWER(?) " +
+                    "ORDER BY id_morador FETCH FIRST 1 ROWS ONLY");
             ps.setString(1, email);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? lerMorador(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                morador = lerMorador(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar o morador.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return morador;
     }
 
     /**
      * Lista todos os moradores cadastrados, em uma única consulta.
      *
      * @return lista de moradores cadastrados
-     * @throws IllegalStateException se o banco falhar
      */
     public List<Morador> listar() {
         List<Morador> moradores = new ArrayList<>();
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Morador");
-             ResultSet rs = ps.executeQuery()) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Morador");
+            ResultSet rs = ps.executeQuery();
+
             while (rs.next()) {
                 moradores.add(lerMorador(rs));
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar os moradores.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return moradores;
     }

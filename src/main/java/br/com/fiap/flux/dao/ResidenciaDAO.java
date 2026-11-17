@@ -44,15 +44,16 @@ public class ResidenciaDAO {
      *
      * @param residencia residência a ser cadastrada
      * @param idMorador  identificador do morador que será o titular
-     * @throws IllegalStateException se o banco falhar (nada é gravado)
      */
     public void cadastrarComTitular(Residencia residencia, int idMorador) {
-        try (Connection con = ConnectionFactory.obterConexao()) {
+        Connection conexao = ConnectionFactory.obterConexao();
+
+        try {
             boolean confirmado = false;
             try {
-                con.setAutoCommit(false);
+                conexao.setAutoCommit(false);
 
-                cadastrar(con, residencia);
+                cadastrar(conexao, residencia);
 
                 Morador morador = new Morador();
                 morador.setIdMorador(idMorador);
@@ -60,22 +61,29 @@ public class ResidenciaDAO {
                 titular.setTipoVinculo(TipoVinculoEnum.TITULAR);
                 titular.setMorador(morador);
                 titular.setResidencia(residencia);
-                new MoradorResidenciaDAO().cadastrar(con, titular);
+                new MoradorResidenciaDAO().cadastrar(conexao, titular);
 
-                con.commit();
+                conexao.commit();
                 confirmado = true;
             } finally {
                 // Desfaz antes de devolver a conexão: no Oracle, ligar o autocommit com a
                 // transação aberta confirmaria tudo.
                 if (!confirmado) {
-                    con.rollback();
+                    conexao.rollback();
                 }
-                con.setAutoCommit(true);
+                conexao.setAutoCommit(true);
             }
         } catch (SQLException e) {
             e.printStackTrace();
             residencia.setIdResidencia(0);
-            throw new IllegalStateException("Não foi possível cadastrar a residência.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -113,7 +121,6 @@ public class ResidenciaDAO {
      * Atualiza as configurações de uma residência. A data de cadastro não é alterada.
      *
      * @param residencia residência com os dados atualizados (o id é usado como referência)
-     * @throws IllegalStateException se o banco falhar
      */
     public void alterar(Residencia residencia) {
         String sql = "UPDATE Residencia SET ds_endereco = ?, nr_moradores = ?, " +
@@ -121,8 +128,12 @@ public class ResidenciaDAO {
                 "nr_limite_vazamento_min = ?, hr_inicio_menor_consumo = ?, " +
                 "hr_fim_menor_consumo = ? " +
                 "WHERE id_residencia = ?";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setString(1, residencia.getEndereco());
             ps.setInt(2, residencia.getQtdMoradores());
             ps.setString(3, residencia.getPeriodoAusencia());
@@ -131,10 +142,20 @@ public class ResidenciaDAO {
             ps.setTimestamp(6, gravarHorario(residencia.getInicioMenorConsumo()));
             ps.setTimestamp(7, gravarHorario(residencia.getFimMenorConsumo()));
             ps.setInt(8, residencia.getIdResidencia());
+
             ps.executeUpdate();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível atualizar a residência.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -145,7 +166,6 @@ public class ResidenciaDAO {
      * autorização. Se restar algum, as chaves estrangeiras barram a exclusão e nada é apagado.
      *
      * @param idResidencia identificador da residência a ser removida
-     * @throws IllegalStateException se o banco falhar (nada é apagado)
      */
     public void excluir(int idResidencia) {
         String[] comandos = {
@@ -155,27 +175,36 @@ public class ResidenciaDAO {
                 "DELETE FROM Residencia WHERE id_residencia = ?"
         };
 
-        try (Connection con = ConnectionFactory.obterConexao()) {
+        Connection conexao = ConnectionFactory.obterConexao();
+
+        try {
             boolean confirmado = false;
             try {
-                con.setAutoCommit(false);
+                conexao.setAutoCommit(false);
                 for (String sql : comandos) {
-                    try (PreparedStatement ps = con.prepareStatement(sql)) {
+                    try (PreparedStatement ps = conexao.prepareStatement(sql)) {
                         ps.setInt(1, idResidencia);
                         ps.executeUpdate();
                     }
                 }
-                con.commit();
+                conexao.commit();
                 confirmado = true;
             } finally {
                 if (!confirmado) {
-                    con.rollback();
+                    conexao.rollback();
                 }
-                con.setAutoCommit(true);
+                conexao.setAutoCommit(true);
             }
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível excluir a residência.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
     }
 
@@ -186,7 +215,6 @@ public class ResidenciaDAO {
      *
      * @param idResidencia identificador da residência
      * @return {@code true} se existe algum desses registros
-     * @throws IllegalStateException se o banco falhar
      */
     public boolean possuiHistorico(int idResidencia) {
         String sql = "SELECT " +
@@ -196,19 +224,38 @@ public class ResidenciaDAO {
                 "(SELECT COUNT(*) FROM Autorizacao_Contato ac " +
                 "JOIN Morador_Residencia mr ON mr.id_morador_residencia = ac.id_morador_residencia " +
                 "WHERE mr.id_residencia = ?) AS total FROM dual";
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        boolean possui = false;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, idResidencia);
             ps.setInt(2, idResidencia);
             ps.setInt(3, idResidencia);
             ps.setInt(4, idResidencia);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() && rs.getInt("total") > 0;
+
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                possui = rs.getInt("total") > 0;
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível verificar o histórico da residência.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return possui;
     }
 
     /**
@@ -216,19 +263,36 @@ public class ResidenciaDAO {
      *
      * @param idResidencia identificador da residência
      * @return a residência encontrada, ou {@code null} caso não exista
-     * @throws IllegalStateException se o banco falhar
      */
     public Residencia buscarPorId(int idResidencia) {
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement("SELECT * FROM Residencia WHERE id_residencia = ?")) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+        Residencia residencia = null;
+
+        try {
+            ps = conexao.prepareStatement("SELECT * FROM Residencia WHERE id_residencia = ?");
             ps.setInt(1, idResidencia);
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? montar(rs) : null;
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                residencia = montar(rs);
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível consultar a residência.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
+        return residencia;
     }
 
     /**
@@ -237,7 +301,6 @@ public class ResidenciaDAO {
      *
      * @param idMorador identificador do morador
      * @return residências do morador, da mais antiga para a mais nova
-     * @throws IllegalStateException se o banco falhar
      */
     public List<ResidenciaComVinculo> listarPorMorador(int idMorador) {
         List<ResidenciaComVinculo> residencias = new ArrayList<>();
@@ -245,18 +308,32 @@ public class ResidenciaDAO {
                 "JOIN Morador_Residencia mr ON mr.id_residencia = r.id_residencia " +
                 "WHERE mr.id_morador = ? ORDER BY r.id_residencia";
 
-        try (Connection con = ConnectionFactory.obterConexao();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        Connection conexao = ConnectionFactory.obterConexao();
+        PreparedStatement ps = null;
+
+        try {
+            ps = conexao.prepareStatement(sql);
             ps.setInt(1, idMorador);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    residencias.add(new ResidenciaComVinculo(
-                            montar(rs), TipoVinculoEnum.valueOf(rs.getString("ds_tipo_vinculo"))));
-                }
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+                residencias.add(new ResidenciaComVinculo(
+                        montar(rs), TipoVinculoEnum.valueOf(rs.getString("ds_tipo_vinculo"))));
             }
+
+            rs.close();
+            ps.close();
+
         } catch (SQLException e) {
             e.printStackTrace();
-            throw new IllegalStateException("Não foi possível listar as residências.", e);
+        } finally {
+            try {
+                if (conexao != null && !conexao.isClosed()) {
+                    conexao.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         }
         return residencias;
     }
